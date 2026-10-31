@@ -33,12 +33,12 @@ pnpm dev:web     # http://localhost:5173/sim
 
 | 이름 | 내용 |
 |---|---|
-| `META_API_KEY` | Meta Model API 키 |
-| `TTS_API_KEY` | Soniox API 키 |
+| `META_API_KEY` | Meta Model API 키. LLM과 STT 모두 이 키를 씁니다 |
+| `TTS_API_KEY` | TTS 공급자 키. TTS를 정한 뒤에만 필요합니다 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase 서비스 역할 키 |
 | `SIM_ACCESS_CODE` | 시뮬레이터 접속 코드 |
 
-TTS 키 없이 전사만 확인하려면 `TTS_PROVIDER`를 `none`으로 바꿉니다.
+STT는 Meta Muse Voice Transcribe입니다. Meta API에는 TTS가 없고 공급자는 PoC 후 결정합니다. 그때까지 `TTS_PROVIDER`는 `none`이라 음성 없이 전사와 글자로만 통화가 진행됩니다. `soniox`는 PoC용으로 구현해 둔 후보이며, `wrangler.jsonc`에서 `soniox`로 바꾸고 `TTS_API_KEY`를 등록하면 켜집니다.
 
 ## 배포
 

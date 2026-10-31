@@ -159,7 +159,7 @@ await new Promise((resolve) => providers.listen(FAKE_PORT, resolve));
 
 const vars = {
   META_API_KEY: "test-meta", META_BASE_URL: `${fake}/v1`, META_STT_URL: `${fake}/stt`,
-  TTS_API_KEY: "test-tts", TTS_URL: `${fake}/tts`, SUPABASE_URL: fake, SUPABASE_SERVICE_ROLE_KEY: "test-service",
+  TTS_PROVIDER: "soniox", TTS_API_KEY: "test-tts", TTS_URL: `${fake}/tts`, SUPABASE_URL: fake, SUPABASE_SERVICE_ROLE_KEY: "test-service",
   ALLOWED_ORIGINS: ORIGIN, SIM_ACCESS_CODE: "code",
 };
 const worker = spawn("pnpm", ["exec", "wrangler", "dev", "--port", String(WORKER_PORT), ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])], {

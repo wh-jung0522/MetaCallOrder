@@ -106,6 +106,7 @@ export function SimulatorPage() {
         setStatus("transferred");
         break;
       case "hangup":
+        if (message.reason) setError(message.reason);
         setStatus((current) => (current === "transferred" ? current : "ended"));
         break;
       case "agent_event":

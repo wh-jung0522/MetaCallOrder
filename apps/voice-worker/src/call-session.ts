@@ -72,7 +72,7 @@ export class CallSession extends DurableObject<Env> {
       if (start.type !== "start" || !start.callerId) return;
       this.begin(server, start.callerId).catch((error) => {
         console.error("call start failed", error);
-        server.send(JSON.stringify({ type: "hangup", reason: "start_failed" }));
+        server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
         server.close(1011, "start failed");
       });
     });
@@ -80,6 +80,11 @@ export class CallSession extends DurableObject<Env> {
   }
 
   private async begin(socket: WebSocket, callerId: string): Promise<void> {
+    if (!this.env.META_API_KEY) {
+      socket.send(JSON.stringify({ type: "hangup", reason: "META_API_KEY가 아직 등록되지 않았습니다." }));
+      socket.close(1011, "missing meta key");
+      return;
+    }
     const transport = new SimulatorTransport(socket, callerId);
     this.transport = transport;
     this.startedAt = Date.now();
