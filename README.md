@@ -3,7 +3,7 @@
 어르신이 전화로 음식·생필품을 주문하는 AI 음성 주문 서비스의 MVP입니다.
 
 ```
-apps/web            대시보드와 /sim 전화 시뮬레이터 (Cloudflare Pages)
+apps/web            대시보드와 /sim 전화 시뮬레이터, shadcn/ui (Cloudflare Pages)
 apps/voice-worker   통화 1건당 Durable Object 1개 (Cloudflare Workers)
 packages/audio      μ-law, 리샘플러
 packages/agents     프롬프트, 도구, 에이전트 루프, 주문 확인 게이트

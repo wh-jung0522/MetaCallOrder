@@ -1,9 +1,9 @@
 import { CallRepository, CustomerRepository, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
 import { isBargeIn, isHandoffRequest, isRepeatRequest, OrderSession, runConversationTurn, type OrderToolContext, type TurnAction } from "@callorder/agents";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
-import { missingSecrets, type Env } from "./env";
+import { createDb, missingSecrets, type Env } from "./env";
 import { MuseStt } from "./stt";
 import { SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, type Tts } from "./tts";
@@ -16,6 +16,7 @@ const SILENCE_MS = 7000;
 const MAX_SILENCE_PROMPTS = 3;
 const MAX_CALL_MS = 15 * 60_000;
 const SLOW_DOWN = 0.1;
+const TTS_DRAIN_TIMEOUT_MS = 15_000;
 
 // USD. Meta: dev.meta.ai/docs/pricing-rate-limits. Soniox: soniox.com/pricing ($4/1M input tokens, ~0.3 token per char, ~$0.70/hour of audio).
 const PRICE = { sttPerSecond: 0.18 / 3600, llmInput: 1.25 / 1e6, llmOutput: 4.25 / 1e6, ttsPerChar: (4 / 1e6) * 0.3, ttsPerSecond: 0.7 / 3600 };
@@ -90,7 +91,7 @@ export class CallSession extends DurableObject<Env> {
     this.transport = transport;
     this.startedAt = Date.now();
 
-    this.db = createClient(this.env.SUPABASE_URL, this.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+    this.db = createDb(this.env);
     this.calls = new CallRepository(this.db);
     const customers = new CustomerRepository(this.db);
     this.llm = new OpenAI({ apiKey: this.env.META_API_KEY, baseURL: this.env.META_BASE_URL, maxRetries: 1 });
@@ -113,10 +114,15 @@ export class CallSession extends DurableObject<Env> {
       onOrderPlaced: (order, storeName) => this.onOrderPlaced(customers, order, storeName),
     };
 
-    transport.sendEvent({ type: "start_ack", callId: this.callId, sampleRate: TTS_SAMPLE_RATE });
+    transport.sendEvent({ type: "start_ack", callId: this.callId, sampleRate: TTS_SAMPLE_RATE, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.onHangup(() => void this.finish());
     transport.onDtmf((digit) => this.onDtmf(digit));
-    transport.onUtterance((text) => this.onFinal(text));
+    transport.onUtterance((text) => {
+      this.speechEndedAt = Date.now();
+      this.current = {};
+      this.mark("speech_end_ms");
+      this.onFinal(text);
+    });
     transport.onAudio((pcm) => this.stt?.sendAudio(pcm));
     this.callTimer = setTimeout(() => this.endWith("max_duration"), MAX_CALL_MS);
 
@@ -209,7 +215,9 @@ export class CallSession extends DurableObject<Env> {
   }
 
   private applyConfirmation(outcome: "confirmed" | "rejected" | "none"): void {
-    if (outcome !== "none") this.emit("confirmation", { outcome });
+    if (outcome === "none") return;
+    this.emit("confirmation", { outcome });
+    this.emit("state", { state: this.derivedState() });
   }
 
   private onDtmf(digit: string): void {
@@ -245,7 +253,7 @@ export class CallSession extends DurableObject<Env> {
         { client: this.llm.chat.completions, model: this.env.META_LLM_MODEL },
         {
           speak: (text) => this.say(text),
-          onToolCall: (name, args, result) => this.emit("tool_call", { name, args, result }),
+          onToolCall: (tool, args, result) => this.emit("tool_call", { tool, args, result }),
           onFirstToken: () => this.mark("llm_first_token_ms"),
           onUsage: (usage) => {
             this.usage.input += usage.prompt_tokens;
@@ -268,7 +276,7 @@ export class CallSession extends DurableObject<Env> {
 
     if (action?.type === "handoff") return this.handoff(action.reason);
     if (action?.type === "end_call") return this.endWith(this.outcome === "abandoned" ? "completed" : this.outcome);
-    await this.tts.drained();
+    await this.ttsDrained();
     if (this.current.speech_end_ms !== undefined) {
       this.metrics.push(this.current);
       this.emit("latency", { ...this.current });
@@ -363,8 +371,13 @@ export class CallSession extends DurableObject<Env> {
     void this.afterPlayback(() => this.finish(outcome));
   }
 
+  // A TTS stream that never terminates must not freeze the call.
+  private ttsDrained(): Promise<unknown> {
+    return Promise.race([this.tts.drained(), new Promise((resolve) => setTimeout(resolve, TTS_DRAIN_TIMEOUT_MS))]);
+  }
+
   private async afterPlayback(action: () => Promise<void>): Promise<void> {
-    await this.tts.drained();
+    await this.ttsDrained();
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, this.playingUntil - Date.now())));
     await action();
   }
@@ -385,6 +398,8 @@ export class CallSession extends DurableObject<Env> {
       this.usage.ttsChars * PRICE.ttsPerChar +
       this.usage.ttsSeconds * PRICE.ttsPerSecond;
     this.transport.sendEvent({ type: "agent_event", name: "call_cost", cost_usd: cost });
+    // The caller is released first, so a slow database never keeps the line open.
+    this.transport.hangup();
     try {
       await this.calls.finish(this.callId, {
         outcome,
@@ -398,7 +413,6 @@ export class CallSession extends DurableObject<Env> {
     }
     // Transcripts live in Supabase under the 30-day retention job, so the DO keeps nothing.
     await this.ctx.storage.deleteAll();
-    this.transport.hangup();
   }
 
   private record(role: "caller" | "agent", text: string): void {

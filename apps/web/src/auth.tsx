@@ -1,10 +1,24 @@
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { supabase } from "./supabase";
 
-export function RequireLogin({ children }: { children: (session: Session) => ReactNode }) {
+interface Props {
+  title: string;
+  description: string;
+  children: (session: Session) => ReactNode;
+}
+
+export function RequireLogin({ title, description, children }: Props) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -12,32 +26,69 @@ export function RequireLogin({ children }: { children: (session: Session) => Rea
     return () => data.subscription.unsubscribe();
   }, []);
 
-  if (session === undefined) return <p>불러오는 중…</p>;
+  if (session === undefined) {
+    return (
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
   if (session) {
     return (
-      <>
-        <p className="muted">{session.user.email} · <button className="link" onClick={() => supabase.auth.signOut()}>로그아웃</button></p>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <span>{session.user.email}</span>
+            <Button variant="outline" size="sm" onClick={() => supabase.auth.signOut()}>로그아웃</Button>
+          </div>
+        </div>
         {children(session)}
-      </>
+      </div>
     );
   }
 
   const login = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setPending(true);
     const form = new FormData(event.currentTarget);
     const { error: failure } = await supabase.auth.signInWithPassword({
       email: String(form.get("email")),
       password: String(form.get("password")),
     });
-    setError(failure ? "이메일이나 비밀번호를 확인해 주세요." : "");
+    setPending(false);
+    setError(failure ? "이메일이나 비밀번호가 맞지 않습니다. 다시 입력해 주세요." : "");
   };
 
   return (
-    <form className="card login" onSubmit={login}>
-      <label>이메일 <input name="email" type="email" required autoComplete="username" /></label>
-      <label>비밀번호 <input name="password" type="password" required autoComplete="current-password" /></label>
-      <button>로그인</button>
-      {error && <p role="alert" className="error">{error}</p>}
-    </form>
+    <div className="flex flex-1 items-center justify-center bg-muted p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={login}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="email">이메일</FieldLabel>
+                <Input id="email" name="email" type="email" required autoComplete="username" />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="password">비밀번호</FieldLabel>
+                <Input id="password" name="password" type="password" required autoComplete="current-password" />
+              </Field>
+              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+              <Button type="submit" disabled={pending}>
+                {pending && <Spinner data-icon="inline-start" />}
+                로그인
+              </Button>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

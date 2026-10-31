@@ -1,6 +1,5 @@
 import { CustomerRepository } from "@callorder/adapters";
-import { createClient } from "@supabase/supabase-js";
-import type { Env } from "./env";
+import { createDb, type Env } from "./env";
 
 export { CallSession } from "./call-session";
 
@@ -38,8 +37,7 @@ export default {
     if (url.pathname === "/sim/callers") {
       // No service key yet: the simulator still opens and the call explains what is missing.
       if (!env.SUPABASE_SERVICE_ROLE_KEY) return Response.json([], { headers: corsHeaders(origin!) });
-      const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-      return Response.json(await new CustomerRepository(db).listDemo(), { headers: corsHeaders(origin!) });
+      return Response.json(await new CustomerRepository(createDb(env)).listDemo(), { headers: corsHeaders(origin!) });
     }
 
     if (url.pathname === "/sim/stream") {

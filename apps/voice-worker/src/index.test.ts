@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./call-session", () => ({ CallSession: class {} }));
-vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({}) }));
+vi.mock("./env", () => ({ createDb: () => ({}) }));
 
 const { isAllowedOrigin } = await import("./index");
 const allowed = "https://callorder-web.pages.dev,https://*.callorder-web.pages.dev";

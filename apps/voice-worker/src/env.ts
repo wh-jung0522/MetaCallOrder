@@ -1,3 +1,14 @@
+import { createClient } from "@supabase/supabase-js";
+
+const DB_TIMEOUT_MS = 8000;
+
+export function createDb(env: Env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+    global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(DB_TIMEOUT_MS) }) },
+  });
+}
+
 export interface Env {
   CALL_SESSION: DurableObjectNamespace;
   META_API_KEY: string;
