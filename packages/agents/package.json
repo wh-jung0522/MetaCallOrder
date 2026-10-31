@@ -1,0 +1,8 @@
+{
+  "name": "@callorder/agents",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc" },
+  "dependencies": { "@callorder/adapters": "workspace:*", "openai": "^7.47.0" }
+}

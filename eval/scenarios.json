@@ -1,0 +1,7 @@
+[
+  { "id": "happy-path", "caller": "+821000000001", "turns": ["저번에 시킨 국밥 두 그릇 갖다 줘요", "안 맵게요", "네"], "expect": { "outcome": "ordered", "total": 20000 } },
+  { "id": "correction", "caller": "+821000000001", "turns": ["순대국밥 두 개요", "안 맵게요", "아니요 하나만요", "네"], "expect": { "outcome": "ordered", "total": 11000 } },
+  { "id": "dialect-alias", "caller": "+821000000002", "turns": ["자장면 곱빼기 두 개 시켜 주소", "네"], "expect": { "outcome": "ordered" } },
+  { "id": "handoff", "caller": "+821000000002", "turns": ["상담원 바꿔줘"], "expect": { "outcome": "handoff" } },
+  { "id": "unregistered", "caller": "+821099999999", "turns": ["짜장면 하나요"], "expect": { "outcome": "handoff" } }
+]

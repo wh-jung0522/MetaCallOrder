@@ -1,0 +1,8 @@
+{
+  "name": "@callorder/adapters",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc" },
+  "dependencies": { "@supabase/supabase-js": "^2.118.0" }
+}
