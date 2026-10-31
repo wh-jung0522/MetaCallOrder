@@ -3,7 +3,7 @@ import { isBargeIn, isHandoffRequest, isRepeatRequest, OrderSession, runConversa
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
-import type { Env } from "./env";
+import { missingSecrets, type Env } from "./env";
 import { MuseStt } from "./stt";
 import { SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, type Tts } from "./tts";
@@ -80,9 +80,10 @@ export class CallSession extends DurableObject<Env> {
   }
 
   private async begin(socket: WebSocket, callerId: string): Promise<void> {
-    if (!this.env.META_API_KEY) {
-      socket.send(JSON.stringify({ type: "hangup", reason: "META_API_KEY가 아직 등록되지 않았습니다." }));
-      socket.close(1011, "missing meta key");
+    const missing = missingSecrets(this.env);
+    if (missing.length) {
+      socket.send(JSON.stringify({ type: "hangup", reason: `Worker 비밀값이 아직 없습니다: ${missing.join(", ")}` }));
+      socket.close(1011, "missing secrets");
       return;
     }
     const transport = new SimulatorTransport(socket, callerId);

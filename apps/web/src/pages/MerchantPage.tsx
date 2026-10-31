@@ -15,7 +15,7 @@ function Orders() {
       {orders.length === 0 && <p className="muted">들어온 주문이 없습니다.</p>}
       {orders.map((order) => (
         <article key={order.id} className={`card ${order.id === newestId ? "new" : ""}`}>
-          <header><strong>{order.customers?.name}</strong> · {order.stores?.name}<span className={`badge ${order.status}`}>{STATUS_LABEL[order.status]}</span></header>
+          <header><strong>{order.stores?.name}</strong><span className={`badge ${order.status}`}>{STATUS_LABEL[order.status]}</span></header>
           <p>{describeItems(order.items)}</p>
           <p>{order.delivery_address} · {order.total.toLocaleString("ko-KR")}원 · {new Date(order.created_at).toLocaleTimeString("ko-KR")}</p>
           {order.status === "pending" && (

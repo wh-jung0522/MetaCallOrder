@@ -36,6 +36,8 @@ export default {
     }
 
     if (url.pathname === "/sim/callers") {
+      // No service key yet: the simulator still opens and the call explains what is missing.
+      if (!env.SUPABASE_SERVICE_ROLE_KEY) return Response.json([], { headers: corsHeaders(origin!) });
       const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
       return Response.json(await new CustomerRepository(db).listDemo(), { headers: corsHeaders(origin!) });
     }

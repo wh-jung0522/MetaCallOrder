@@ -15,3 +15,9 @@ export interface Env {
   ALLOWED_ORIGINS: string;
   SIM_ACCESS_CODE: string;
 }
+
+export function missingSecrets(env: Env): string[] {
+  const required: (keyof Env)[] = ["META_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"];
+  if (env.TTS_PROVIDER !== "none") required.push("TTS_API_KEY");
+  return required.filter((name) => !env[name]);
+}
