@@ -59,6 +59,7 @@ const TOOL_LABEL: Record<string, Pair> = {
 };
 
 const NONE: Pair = ["없음", "None"];
+const PHONE_NUMBER = "070-5276-7404";
 const BAD_CODE: Pair = ["접속 코드가 맞지 않습니다. 다시 입력해 주세요.", "That access code is not right. Please try again."];
 const NO_SERVER: Pair = ["서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.", "Could not reach the server. Please try again in a moment."];
 
@@ -94,6 +95,7 @@ const ms = (value: number | undefined, t: T) => (value === undefined ? t(...NONE
 export function SimulatorPage() {
   const { t } = useT();
   const [code, setCode] = useState(() => localStorage.getItem("sim-code") ?? "");
+  const [mode, setMode] = useState<"web" | "phone">("web");
   const [verified, setVerified] = useState(false);
   const [checking, setChecking] = useState(false);
   const [callers, setCallers] = useState<{ name: string; phone_e164: string }[]>([]);
@@ -354,8 +356,34 @@ export function SimulatorPage() {
 
   const callerName = callers.find((caller) => caller.phone_e164 === callerId)?.name;
 
+  const modeSwitch = (
+    <div role="group" aria-label={t("전화 방법", "How to call")} className="mx-auto flex w-full max-w-sm gap-1 rounded-lg bg-muted p-1">
+      <Button variant={mode === "web" ? "default" : "ghost"} className="flex-1" aria-pressed={mode === "web"} disabled={inCall} onClick={() => setMode("web")}>{t("웹 시뮬레이터", "Web simulator")}</Button>
+      <Button variant={mode === "phone" ? "default" : "ghost"} className="flex-1" aria-pressed={mode === "phone"} disabled={inCall} onClick={() => setMode("phone")}>{t("실제 전화번호", "Real phone number")}</Button>
+    </div>
+  );
+
+  if (mode === "phone") {
+    return (
+      <div className="flex flex-1 flex-col gap-6 bg-muted p-6">
+        {modeSwitch}
+        <Card className="mx-auto w-full max-w-sm text-center">
+          <CardHeader>
+            <CardTitle className="text-xl">{t("이 번호로 전화하세요", "Call this number")}</CardTitle>
+            <CardDescription>{t("휴대폰으로 걸면 AI가 받아 주문을 도와드립니다. 한국어와 영어 모두 됩니다.", "An AI answers and takes your order, in Korean or English.")}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <a href={`tel:${PHONE_NUMBER.replaceAll("-", "")}`} className="text-3xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline">{PHONE_NUMBER}</a>
+            <p className="text-sm text-muted-foreground">{t("등록된 번호로 걸어야 주문할 수 있습니다. 다른 번호는 안내만 듣고 끊어집니다.", "Orders work from registered numbers only. Other numbers hear a short notice and the call ends.")}</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 p-4 md:p-6">
+      {modeSwitch}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <Field className="w-72">
           <FieldLabel htmlFor="caller">{t("어느 번호로 걸까요?", "Which number are you calling from?")}</FieldLabel>
