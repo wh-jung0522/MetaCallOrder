@@ -59,10 +59,11 @@ const TOOL_LABEL: Record<string, Pair> = {
 };
 
 const NONE: Pair = ["없음", "None"];
-const PHONE_NUMBER = "070-5276-7404";
-const PHONE_FLAG = "🇰🇷";
-// ponytail: English opens the simulator because a Korean number is an international call from abroad. Make both "phone" once a US number exists.
-const DEFAULT_MODE = { ko: "phone", en: "web" } as const;
+// Each number answers in its own language first and understands both. The caller's language comes first on screen.
+const PHONE_LINES = [
+  { lang: "ko", flag: "🇰🇷", number: "070-5276-7404", tel: "07052767404", name: ["한국 번호", "Korean number"] },
+  { lang: "en", flag: "🇺🇸", number: "+1 515-349-6768", tel: "+15153496768", name: ["미국 번호", "US number"] },
+] as const;
 const BAD_CODE: Pair = ["접속 코드가 맞지 않습니다. 다시 입력해 주세요.", "That access code is not right. Please try again."];
 const NO_SERVER: Pair = ["서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.", "Could not reach the server. Please try again in a moment."];
 
@@ -98,7 +99,7 @@ const ms = (value: number | undefined, t: T) => (value === undefined ? t(...NONE
 export function SimulatorPage() {
   const { t, lang } = useT();
   const [code, setCode] = useState(() => localStorage.getItem("sim-code") ?? "");
-  const [mode, setMode] = useState<"web" | "phone">(() => DEFAULT_MODE[lang]);
+  const [mode, setMode] = useState<"web" | "phone">("phone");
   const [verified, setVerified] = useState(false);
   const [checking, setChecking] = useState(false);
   const [callers, setCallers] = useState<{ name: string; phone_e164: string }[]>([]);
@@ -380,7 +381,11 @@ export function SimulatorPage() {
             <CardDescription>{t("휴대폰으로 걸면 AI가 받아 주문을 도와드립니다. 한국어와 영어 모두 됩니다.", "An AI answers and takes your order, in Korean or English.")}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <a href={`tel:${PHONE_NUMBER.replaceAll("-", "")}`} aria-label={t(`한국 번호 ${PHONE_NUMBER}`, `Korean number ${PHONE_NUMBER}`)} className="text-3xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline"><span aria-hidden="true">{PHONE_FLAG} </span>{PHONE_NUMBER}</a>
+            {[...PHONE_LINES].sort((a, b) => Number(b.lang === lang) - Number(a.lang === lang)).map((line) => (
+              <a key={line.tel} href={`tel:${line.tel}`} aria-label={`${t(line.name[0], line.name[1])} ${line.number}`} className="text-2xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline">
+                <span aria-hidden="true">{line.flag} </span>{line.number}
+              </a>
+            ))}
             <p className="text-sm text-muted-foreground">{t("누구나 전화해서 주문할 수 있습니다. 배달지는 시연용 주소로 들어갑니다.", "Anyone can call and order. Orders go to a demo address.")}</p>
           </CardContent>
         </Card>

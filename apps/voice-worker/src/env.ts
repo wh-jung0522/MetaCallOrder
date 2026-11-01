@@ -26,6 +26,7 @@ export interface Env {
   ALLOWED_ORIGINS: string;
   SIM_ACCESS_CODE: string;
   PHONE_WEBHOOK_TOKEN: string;
+  TWILIO_AUTH_TOKEN: string;
 }
 
 export function missingSecrets(env: Env): string[] {

@@ -6,7 +6,7 @@ vi.mock("./env", () => ({
   createDb: () => ({ from: () => ({ upsert: async (row: Record<string, unknown>) => { upserts.push(row); return { error: null }; } }) }),
 }));
 
-const { default: worker, isAllowedOrigin, signStream, toE164 } = await import("./index");
+const { default: worker, isAllowedOrigin, signStream, toE164, twilioSignature } = await import("./index");
 const allowed = "https://callorder-web.pages.dev,https://*.callorder-web.pages.dev";
 
 describe("isAllowedOrigin", () => {
@@ -66,5 +66,20 @@ describe("phone routes", () => {
     expect(forged.status).toBe(403);
     const signed = await worker.fetch(new Request(`https://w.test/phone/stream?callId=call-1&caller=%2B821000000001&sig=${sig}`, upgrade), env);
     expect(signed.status).toBe(200);
+  });
+
+  it("checks Twilio's signature and accepts only a signed stream", async () => {
+    const form = new FormData();
+    form.set("To", "+15153496768");
+    form.set("From", "+14155550101");
+    form.set("CallSid", "CA1");
+    expect(await twilioSignature("https://w.test/twilio/voice", form, "twilio-secret")).toBe("tRi4DK5zTrJreIa5fgiwns1wUU0=");
+    const twilioEnv = { ...(env as object), TWILIO_AUTH_TOKEN: "twilio-secret" } as never;
+    const forged = await worker.fetch(new Request("https://w.test/twilio/voice", { method: "POST", body: form, headers: { "x-twilio-signature": "nope" } }), twilioEnv);
+    expect(forged.status).toBe(403);
+    const sig = await signStream("call-1", "+14155550101", "secret");
+    const upgrade = { headers: { upgrade: "websocket" } };
+    expect((await worker.fetch(new Request(`https://w.test/twilio/stream/call-1/en/14155550102/${sig}`, upgrade), env)).status).toBe(403);
+    expect((await worker.fetch(new Request(`https://w.test/twilio/stream/call-1/en/14155550101/${sig}`, upgrade), env)).status).toBe(200);
   });
 });

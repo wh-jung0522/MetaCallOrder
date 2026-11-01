@@ -124,12 +124,12 @@ export class CallSession extends DurableObject<Env> {
     this.callId = url.searchParams.get("callId")!;
     server.addEventListener("message", (event) => {
       if (this.transport || typeof event.data !== "string") return;
-      const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string };
+      const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string; start?: { streamSid?: string } };
       // The Worker signed this caller id before routing here, and it is empty when the number is blocked; the simulator states its own.
       const isPhone = url.pathname === "/phone/stream";
       if (isPhone ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
       const callerId = isPhone ? (url.searchParams.get("caller") ?? "") : start.callerId!;
-      this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId) : new SimulatorTransport(server, callerId)).catch((error) => {
+      this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId, start.start?.streamSid) : new SimulatorTransport(server, callerId)).catch((error) => {
         console.error("call start failed", error);
         server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
         server.close(1011, "start failed");

@@ -82,7 +82,8 @@ export class PhoneTransport implements TelephonyTransport {
   private lastAudioAt = 0;
   private pacer = 0;
 
-  constructor(private socket: WebSocket, readonly callerId: string) {
+  // Twilio requires the stream id on everything sent to it; ClawOps needs nothing extra.
+  constructor(private socket: WebSocket, readonly callerId: string, private streamSid?: string) {
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return;
       const message = JSON.parse(event.data) as { event?: string; media?: { payload?: string }; dtmf?: { digit?: string } };
@@ -126,7 +127,7 @@ export class PhoneTransport implements TelephonyTransport {
     this.nextFrameAt = Math.max(this.nextFrameAt, now);
     while (this.outbox.length - sent >= PHONE_FRAME_BYTES && this.nextFrameAt < now + PHONE_LEAD_MS) {
       const payload = btoa(String.fromCharCode(...this.outbox.subarray(sent, sent + PHONE_FRAME_BYTES)));
-      send(this.socket, JSON.stringify({ event: "media", media: { payload } }));
+      send(this.socket, JSON.stringify({ event: "media", streamSid: this.streamSid, media: { payload } }));
       sent += PHONE_FRAME_BYTES;
       this.nextFrameAt += PHONE_FRAME_MS;
     }
@@ -137,7 +138,7 @@ export class PhoneTransport implements TelephonyTransport {
   clearPlayback() {
     this.outbox = new Uint8Array(0);
     this.nextFrameAt = 0;
-    send(this.socket, JSON.stringify({ event: "clear" }));
+    send(this.socket, JSON.stringify({ event: "clear", streamSid: this.streamSid }));
   }
   // ponytail: no operator line exists yet, so the caller is told and the call ends. Dial a real number here when one does.
   async transfer() {}

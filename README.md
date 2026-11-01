@@ -48,3 +48,5 @@ STT는 Meta Muse Voice Transcribe, TTS는 Typecast(`ssfm-v31`, 목소리 서현)
 ## 실제 전화
 
 ClawOps 070 번호의 착신을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/phone/voice`, POST)으로 두고 `webhookHeaders`에 `X-Callorder-Token`을 넣습니다. 처음 거는 번호는 `customers`에 자동으로 등록되어(이름 `고객`, 시연용 주소 행복동 12번지, `is_demo=false`) 어느 전화로든 주문할 수 있습니다. `is_demo=false`이므로 번호와 통화, 주문은 공개 화면에 나오지 않고, 가게 계정과 관리자 로그인으로만 보입니다. 발신번호가 표시되지 않는 전화는 고객 없이 연결되며 주문은 할 수 없습니다.
+
+미국 번호는 Twilio입니다. 번호의 Voice 설정에서 A call comes in을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/twilio/voice`, HTTP POST)으로 둡니다. `TWILIO_AUTH_TOKEN` 시크릿으로 서명을 검증합니다.
