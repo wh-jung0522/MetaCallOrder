@@ -35,6 +35,7 @@ pnpm dev:web     # http://localhost:5173/sim
 |---|---|
 | `META_API_KEY` | Meta Model API 키. LLM과 STT 모두 이 키를 씁니다 |
 | `TTS_API_KEY` | Typecast API 키 |
+| `PHONE_WEBHOOK_TOKEN` | ClawOps 번호의 Webhook이 `X-Callorder-Token` 헤더로 보내는 공유 비밀값 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase 서비스 역할 키 |
 | `SIM_ACCESS_CODE` | 시뮬레이터 접속 코드 |
 
@@ -43,3 +44,7 @@ STT는 Meta Muse Voice Transcribe, TTS는 Typecast(`ssfm-v31`, 목소리 서현)
 ## 배포
 
 `main`에 푸시하면 Cloudflare가 Pages(`callorder-web`)와 Worker(`callorder-voice`)를 빌드해 배포합니다. Supabase 마이그레이션은 배포에 포함하지 않으며 직접 적용합니다.
+
+## 실제 전화
+
+ClawOps 070 번호의 착신을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/phone/voice`, POST)으로 두고 `webhookHeaders`에 `X-Callorder-Token`을 넣습니다. `customers`에 등록된 번호만 통화가 연결되고, 나머지는 안내 후 끊어 API 비용이 들지 않습니다.

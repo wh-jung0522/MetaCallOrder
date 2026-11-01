@@ -1,4 +1,4 @@
-// Pure audio helpers. Twilio μ-law paths use these; the simulator path needs no conversion.
+// Pure audio helpers. Phone μ-law paths use these; the simulator path needs no conversion.
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;

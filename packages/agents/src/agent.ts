@@ -212,6 +212,8 @@ export async function runConversationTurn(
       return null;
     }
     if (action) return action;
+    // The system has announced the order, so the call ends without another model turn.
+    if (ctx.placedOrder) return { type: "end_call" };
   }
   throw new Error("대화 단계가 너무 많습니다");
 }

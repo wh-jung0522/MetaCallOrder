@@ -25,6 +25,7 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   ALLOWED_ORIGINS: string;
   SIM_ACCESS_CODE: string;
+  PHONE_WEBHOOK_TOKEN: string;
 }
 
 export function missingSecrets(env: Env): string[] {

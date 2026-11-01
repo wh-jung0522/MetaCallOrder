@@ -5,16 +5,18 @@ import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
 import { createDb, missingSecrets, type Env } from "./env";
 import { MuseStt } from "./stt";
-import { SimulatorTransport, type TelephonyTransport } from "./transport";
+import { PhoneTransport, SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, TypecastTts, type Tts } from "./tts";
 
-const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silence: string; failSafe: string; handoff: string }> = {
+const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
     greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
     otherLanguage: "한국어로 말씀하셔도 됩니다.",
     silence: "천천히 말씀하셔도 됩니다.",
     failSafe: "죄송합니다. 지금 연결이 원활하지 않아 상담원에게 연결해 드릴게요.",
     handoff: "상담원에게 연결해 드릴게요.",
+    noOperator: "죄송합니다. 지금은 상담원 연결이 되지 않습니다. 잠시 후 다시 전화해 주세요.",
+    ordered: (minutes) => `주문이 완료되었습니다. 약 ${minutes}분 뒤 도착합니다. 감사합니다.`,
   },
   en: {
     greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
@@ -22,6 +24,8 @@ const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silen
     silence: "Please take your time.",
     failSafe: "I'm sorry, the connection is having trouble. Let me connect you to an agent.",
     handoff: "Let me connect you to an agent.",
+    noOperator: "I'm sorry, no agent is available right now. Please call again a little later.",
+    ordered: (minutes) => `Your order is placed. It should arrive in about ${minutes} minutes. Thank you.`,
   },
 };
 const HANDOFF_TARGET = "상담원";
@@ -81,12 +85,16 @@ export class CallSession extends DurableObject<Env> {
     // Recent compatibility dates default to Blob, which reads as zero-length audio here.
     server.binaryType = "arraybuffer";
     server.accept();
-    this.callId = new URL(request.url).searchParams.get("callId")!;
+    const url = new URL(request.url);
+    this.callId = url.searchParams.get("callId")!;
     server.addEventListener("message", (event) => {
       if (this.transport || typeof event.data !== "string") return;
-      const start = JSON.parse(event.data) as { type?: string; callerId?: string };
-      if (start.type !== "start" || !start.callerId) return;
-      this.begin(server, start.callerId).catch((error) => {
+      const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string };
+      // The Worker signed this caller id before routing here; the simulator states its own.
+      const phoneCaller = url.pathname === "/phone/stream" ? url.searchParams.get("caller") : null;
+      if (phoneCaller ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
+      const callerId = phoneCaller ?? start.callerId!;
+      this.begin(server, callerId, phoneCaller ? new PhoneTransport(server, callerId) : new SimulatorTransport(server, callerId)).catch((error) => {
         console.error("call start failed", error);
         server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
         server.close(1011, "start failed");
@@ -95,14 +103,13 @@ export class CallSession extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private async begin(socket: WebSocket, callerId: string): Promise<void> {
+  private async begin(socket: WebSocket, callerId: string, transport: PhoneTransport | SimulatorTransport): Promise<void> {
     const missing = missingSecrets(this.env);
     if (missing.length) {
       socket.send(JSON.stringify({ type: "hangup", reason: `Worker 비밀값이 아직 없습니다: ${missing.join(", ")}` }));
       socket.close(1011, "missing secrets");
       return;
     }
-    const transport = new SimulatorTransport(socket, callerId);
     this.transport = transport;
     this.startedAt = Date.now();
 
@@ -111,9 +118,9 @@ export class CallSession extends DurableObject<Env> {
     const customers = new CustomerRepository(this.db);
     this.llm = new OpenAI({ apiKey: this.env.META_API_KEY, baseURL: this.env.META_BASE_URL, maxRetries: 1 });
 
-    // Anyone with the simulator can pick any caller id, so real customers must stay out of reach here.
+    // Anyone with the simulator can pick any caller id, so real customers must stay out of reach there. A phone caller id comes from the carrier.
     const found = await customers.findByPhone(callerId);
-    this.customer = found?.is_demo ? found : null;
+    this.customer = transport.kind === "phone" || found?.is_demo ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
     this.session.language = callerId.startsWith("+82") ? "ko" : "en";
 
@@ -133,12 +140,14 @@ export class CallSession extends DurableObject<Env> {
     transport.sendEvent({ type: "start_ack", callId: this.callId, sampleRate: TTS_SAMPLE_RATE, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.onHangup(() => void this.finish());
     transport.onDtmf((digit) => this.onDtmf(digit));
-    transport.onUtterance((text) => {
-      this.speechEndedAt = Date.now();
-      this.current = {};
-      this.mark("speech_end_ms");
-      this.onFinal(text);
-    });
+    if (transport instanceof SimulatorTransport) {
+      transport.onUtterance((text) => {
+        this.speechEndedAt = Date.now();
+        this.current = {};
+        this.mark("speech_end_ms");
+        this.onFinal(text);
+      });
+    }
     transport.onAudio((pcm) => this.stt?.sendAudio(pcm));
     this.callTimer = setTimeout(() => this.endWith("max_duration"), MAX_CALL_MS);
 
@@ -352,6 +361,7 @@ export class CallSession extends DurableObject<Env> {
   private async onOrderPlaced(customers: CustomerRepository, order: OrderResult, storeName: string): Promise<void> {
     this.outcome = "ordered";
     this.transport.sendEvent({ type: "order_placed", order, storeName });
+    this.say(PHRASES[this.session.language].ordered(order.eta_minutes));
     if (!this.customer) return;
     const guardians = await customers.guardians(this.customer.id);
     for (const guardian of guardians.filter((candidate) => candidate.notify_on_order)) {
@@ -367,7 +377,8 @@ export class CallSession extends DurableObject<Env> {
     if (this.ended) return;
     this.handoffReason = reason;
     this.turnAbort?.abort();
-    this.say(PHRASES[this.session.language].handoff);
+    const phrases = PHRASES[this.session.language];
+    this.say(this.transport.kind === "phone" ? phrases.noOperator : phrases.handoff);
     void this.afterPlayback(async () => {
       await this.transport.transfer(HANDOFF_TARGET);
       await this.finish("handoff");
@@ -381,9 +392,16 @@ export class CallSession extends DurableObject<Env> {
     this.handoffReason = `fail_safe: ${reason}`;
     this.turnAbort?.abort();
     // The sim falls back to a local voice for this text when TTS itself is the broken piece.
-    const text = PHRASES[this.session.language].failSafe;
+    const phrases = PHRASES[this.session.language];
+    const text = this.transport.kind === "phone" ? phrases.noOperator : phrases.failSafe;
     this.transport.sendEvent({ type: "fail_safe", text });
     this.record("agent", text);
+    // A phone has no local voice to fall back on, so TTS says it unless TTS is what broke.
+    if (this.transport.kind === "phone" && !reason.startsWith("tts")) {
+      this.tts.speak(text, this.spokenRate, this.session.language);
+      void this.afterPlayback(() => this.finish("fail_safe"));
+      return;
+    }
     void this.transport.transfer(HANDOFF_TARGET).then(() => this.finish("fail_safe"));
   }
 
