@@ -442,15 +442,15 @@ export function SimulatorPage() {
               </div>
 
               {onCall ? (
-                <div className="flex flex-1 flex-col items-center pt-10" role="status">
-                  <div className="flex size-20 items-center justify-center rounded-full bg-[#636366] text-3xl font-medium">{t("콜", "C")}</div>
-                  <div className="mt-3 text-2xl font-medium">{t("콜오더", "CallOrder")}</div>
+                <div className={`flex flex-1 flex-col items-center ${showKeypad ? "pt-5" : "pt-10"}`} role="status">
+                  {!showKeypad && <div className="mb-3 flex size-20 items-center justify-center rounded-full bg-[#636366] text-3xl font-medium">{t("콜", "C")}</div>}
+                  <div className="text-2xl font-medium">{t("콜오더", "CallOrder")}</div>
                   <div className="mt-1 text-sm text-[#aeaeb2]">{status === "in_call" ? elapsed : t(...STATUS_TEXT[status])}</div>
-                  <div className="mt-1 text-xs whitespace-nowrap text-[#8e8e93]">{t("내 번호", "My number")} {callerName ? `${callerName}, ` : ""}{formatPhone(callerId)}</div>
-                  <div className="meter mt-4" ref={meter} aria-hidden="true"><i /><i /><i /><i /><i /></div>
+                  {!showKeypad && <div className="mt-1 text-xs whitespace-nowrap text-[#8e8e93]">{t("내 번호", "My number")} {callerName ? `${callerName}, ` : ""}{formatPhone(callerId)}</div>}
+                  <div className={`meter ${showKeypad ? "mt-2" : "mt-4"}`} ref={meter} aria-hidden="true"><i /><i /><i /><i /><i /></div>
 
                   {showKeypad ? (
-                    <div className="mt-auto grid grid-cols-3 justify-items-center gap-y-2.5">
+                    <div className="mt-auto grid w-full grid-cols-3 justify-items-center gap-y-2.5">
                       {KEYS.map((key) => (
                         <button key={key} type="button" className="dial-key" style={{ width: 58, height: 58 }} disabled={status !== "in_call"} aria-label={t(`${key}번`, `Key ${key}`)} onClick={() => pressKey(key)}><b>{key}</b></button>
                       ))}
@@ -482,8 +482,8 @@ export function SimulatorPage() {
                     type="tel"
                     autoComplete="tel"
                     placeholder={t("010-0000-0000", "+1 000 000 0000")}
-                    value={isPreset && callerId !== UNREGISTERED ? formatPhone(callerId) : callerId === UNREGISTERED ? "" : callerId}
-                    onChange={(event) => setCallerId(event.target.value.replace(/[^\d+\- ]/g, ""))}
+                    value={callerId === UNREGISTERED ? "" : formatPhone(callerId)}
+                    onChange={(event) => setCallerId(event.target.value.replace(/[^\d+]/g, ""))}
                   />
                   <div className="h-5 text-center text-xs text-[#30b350]">{callerName ?? ""}</div>
                   <div className="mt-auto grid grid-cols-3 justify-items-center gap-y-3">
