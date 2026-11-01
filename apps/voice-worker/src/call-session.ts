@@ -185,7 +185,8 @@ export class CallSession extends DurableObject<Env> {
       url: this.env.META_STT_URL,
       apiKey: this.env.META_API_KEY,
       model: this.env.META_STT_MODEL,
-      keywords: await customers.sttKeywords(100),
+      // Meta documents no cap on keywords. This only guards against a runaway catalog.
+      keywords: await customers.sttKeywords(1000),
     });
 
     const language = this.session.language;

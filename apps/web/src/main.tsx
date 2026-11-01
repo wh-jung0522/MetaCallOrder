@@ -1,3 +1,4 @@
+import { lazy, Suspense, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { Button } from "@/components/ui/button";
 import { LangProvider, useT, type Pair } from "./i18n";
@@ -8,21 +9,27 @@ import { MerchantPage } from "./pages/MerchantPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 import "./index.css";
 
+// Lazy so Leaflet stays out of the bundle every other screen loads.
+const StoresPage = lazy(() => import("./pages/StoresPage").then((module) => ({ default: module.StoresPage })));
+
 const LINKS: { path: string; label: Pair }[] = [
   { path: "/sim", label: ["전화 걸기", "Make a call"] },
-  { path: "/merchant", label: ["가맹점", "Store"] },
+  { path: "/stores", label: ["가맹점", "Stores"] },
   { path: "/guardian", label: ["보호자", "Guardian"] },
   { path: "/admin", label: ["관리자", "Admin"] },
 ];
 
-const PAGES: Record<string, () => React.JSX.Element> = {
+const PAGES: Record<string, ComponentType> = {
   "/sim": SimulatorPage,
+  "/stores": StoresPage,
   "/merchant": MerchantPage,
   "/guardian": GuardianPage,
   "/admin": AdminPage,
 };
 
 const Page = PAGES[location.pathname] ?? HomePage;
+// The order board has no tab of its own. It belongs to the store tab.
+const activePath = location.pathname === "/merchant" ? "/stores" : location.pathname;
 
 function App() {
   const { t, lang, setLang } = useT();
@@ -32,8 +39,8 @@ function App() {
         <a href="/" className="flex items-center text-lg max-md:h-14 font-extrabold tracking-tight text-primary">{t("콜오더", "CallOrder")}</a>
         <nav aria-label={t("주요 화면", "Main screens")} className="flex gap-1 overflow-x-auto max-md:order-last max-md:w-full max-md:pb-2">
           {LINKS.map(({ path, label }) => (
-            <Button key={path} asChild size="sm" variant={location.pathname === path ? "secondary" : "ghost"}>
-              <a href={path} aria-current={location.pathname === path ? "page" : undefined}>{t(...label)}</a>
+            <Button key={path} asChild size="sm" variant={activePath === path ? "secondary" : "ghost"}>
+              <a href={path} aria-current={activePath === path ? "page" : undefined}>{t(...label)}</a>
             </Button>
           ))}
         </nav>
@@ -43,7 +50,7 @@ function App() {
           <Button size="sm" lang="en" variant={lang === "en" ? "secondary" : "ghost"} aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</Button>
         </div>
       </header>
-      <main className="flex flex-1 flex-col"><Page /></main>
+      <main className="flex flex-1 flex-col"><Suspense><Page /></Suspense></main>
     </div>
   );
 }

@@ -218,3 +218,46 @@ body {
 .meter i:nth-child(3) { --bar: 1; }
 .meter i:nth-child(4) { --bar: 0.7; }
 .meter i:nth-child(5) { --bar: 0.45; }
+
+/* Store map pins. A dot in a 32px target; the selected pin also shows its name. */
+.store-pin {
+  border-radius: 50%;
+}
+.store-pin::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 1px 4px oklch(0.2 0 0 / 45%);
+  transition: transform 0.15s;
+}
+.store-pin.is-closed::before {
+  background: var(--muted-foreground);
+}
+.store-pin:hover::before,
+.store-pin.is-selected::before {
+  transform: scale(1.35);
+}
+.store-pin:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
+}
+.store-pin-label {
+  display: none;
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: 700 13px/1.4 var(--font-sans);
+  white-space: nowrap;
+  box-shadow: 0 1px 4px oklch(0.2 0 0 / 45%);
+}
+.store-pin.is-selected .store-pin-label {
+  display: block;
+}
