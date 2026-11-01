@@ -1,4 +1,4 @@
-import { mulawDecode, mulawEncode, resample } from "@callorder/audio";
+import { mulawDecode, mulawEncode, resample, ThirdRateDownsampler } from "@callorder/audio";
 
 export interface TelephonyTransport {
   readonly kind: "simulator" | "phone";
@@ -62,15 +62,25 @@ export class SimulatorTransport implements TelephonyTransport {
 }
 
 const PHONE_RATE = 8000;
+const PHONE_FRAME_MS = 20;
 const PHONE_FRAME_BYTES = 160; // 20 ms of 8 kHz mulaw
+const MULAW_SILENCE = 0xff;
+const PHONE_LEAD_MS = 200;
+const TAIL_FLUSH_MS = 120;
+const CLOSE_FLUSH_LIMIT_MS = 3000;
 
 // A ClawOps VoiceML <Connect><Stream> socket: JSON events carrying base64 mulaw at 8 kHz.
+// The media server plays every frame as 20 ms, so only whole frames go out, at speaking pace.
 export class PhoneTransport implements TelephonyTransport {
   readonly kind = "phone";
   private audioCb: (pcm: Int16Array) => void = () => {};
   private dtmfCb: (digit: string) => void = () => {};
   private hangupCb: () => void = () => {};
-  private held = new Int16Array(0);
+  private downsampler = new ThirdRateDownsampler();
+  private outbox: Uint8Array = new Uint8Array(0);
+  private nextFrameAt = 0;
+  private lastAudioAt = 0;
+  private pacer = 0;
 
   constructor(private socket: WebSocket, readonly callerId: string) {
     socket.addEventListener("message", (event) => {
@@ -83,36 +93,62 @@ export class PhoneTransport implements TelephonyTransport {
       if (message.event === "dtmf" && /^[0-9*#]$/.test(message.dtmf?.digit ?? "")) this.dtmfCb(message.dtmf!.digit!);
       if (message.event === "stop") this.hangupCb();
     });
-    socket.addEventListener("close", () => this.hangupCb());
+    socket.addEventListener("close", () => {
+      clearInterval(this.pacer);
+      this.hangupCb();
+    });
+    this.pacer = setInterval(() => this.sendDueFrames(), PHONE_FRAME_MS);
   }
 
   onAudio(cb: (pcm: Int16Array) => void) { this.audioCb = cb; }
   onDtmf(cb: (digit: string) => void) { this.dtmfCb = cb; }
   onHangup(cb: () => void) { this.hangupCb = cb; }
 
-  playAudio(pcm16: Int16Array, sampleRate: number) {
-    const samples = new Int16Array(this.held.length + pcm16.length);
-    samples.set(this.held);
-    samples.set(pcm16, this.held.length);
-    // Whole groups only, so the rate change has no seam between chunks.
-    const group = sampleRate / PHONE_RATE;
-    const usable = samples.length - (samples.length % group);
-    this.held = samples.slice(usable);
-    const mulaw = mulawEncode(resample(samples.subarray(0, usable), sampleRate, PHONE_RATE));
-    for (let at = 0; at < mulaw.length; at += PHONE_FRAME_BYTES) {
-      const payload = btoa(String.fromCharCode(...mulaw.subarray(at, at + PHONE_FRAME_BYTES)));
-      send(this.socket, JSON.stringify({ event: "media", media: { payload } }));
-    }
+  // Every TTS provider here delivers 24 kHz.
+  playAudio(pcm16: Int16Array) {
+    const mulaw = mulawEncode(this.downsampler.process(pcm16));
+    const joined = new Uint8Array(this.outbox.length + mulaw.length);
+    joined.set(this.outbox);
+    joined.set(mulaw, this.outbox.length);
+    this.outbox = joined;
+    this.lastAudioAt = Date.now();
   }
+
+  private sendDueFrames() {
+    const now = Date.now();
+    // The end of a sentence rarely fills a frame.
+    if (this.outbox.length % PHONE_FRAME_BYTES && now - this.lastAudioAt > TAIL_FLUSH_MS) {
+      const padded = new Uint8Array(this.outbox.length + PHONE_FRAME_BYTES - (this.outbox.length % PHONE_FRAME_BYTES)).fill(MULAW_SILENCE);
+      padded.set(this.outbox);
+      this.outbox = padded;
+    }
+    let sent = 0;
+    this.nextFrameAt = Math.max(this.nextFrameAt, now);
+    while (this.outbox.length - sent >= PHONE_FRAME_BYTES && this.nextFrameAt < now + PHONE_LEAD_MS) {
+      const payload = btoa(String.fromCharCode(...this.outbox.subarray(sent, sent + PHONE_FRAME_BYTES)));
+      send(this.socket, JSON.stringify({ event: "media", media: { payload } }));
+      sent += PHONE_FRAME_BYTES;
+      this.nextFrameAt += PHONE_FRAME_MS;
+    }
+    if (sent) this.outbox = this.outbox.slice(sent);
+  }
+
   mark() {}
   clearPlayback() {
-    this.held = new Int16Array(0);
+    this.outbox = new Uint8Array(0);
+    this.nextFrameAt = 0;
     send(this.socket, JSON.stringify({ event: "clear" }));
   }
   // ponytail: no operator line exists yet, so the caller is told and the call ends. Dial a real number here when one does.
   async transfer() {}
   hangup() {
-    if (this.socket.readyState === WebSocket.OPEN) this.socket.close(1000, "call ended");
+    const giveUpAt = Date.now() + CLOSE_FLUSH_LIMIT_MS;
+    const closeWhenPlayed = () => {
+      if (this.outbox.length && Date.now() < giveUpAt) return void setTimeout(closeWhenPlayed, PHONE_FRAME_MS);
+      clearInterval(this.pacer);
+      if (this.socket.readyState === WebSocket.OPEN) this.socket.close(1000, "call ended");
+    };
+    closeWhenPlayed();
   }
   sendEvent() {}
 }

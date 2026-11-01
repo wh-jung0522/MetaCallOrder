@@ -49,3 +49,34 @@ export function toBytes(pcm: Int16Array): Uint8Array {
 export function fromBytes(bytes: ArrayBuffer): Int16Array {
   return new Int16Array(bytes, 0, Math.floor(bytes.byteLength / 2));
 }
+
+const THIRD_BAND_TAPS = 47;
+// Hann-windowed sinc cut off at 3.4 kHz for 24 kHz input: the phone band, with nothing left to alias at 8 kHz.
+const THIRD_BAND_FILTER = Array.from({ length: THIRD_BAND_TAPS }, (_, i) => {
+  const n = i - (THIRD_BAND_TAPS - 1) / 2;
+  const cutoff = 3400 / 24000;
+  const sinc = n === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * n) / (Math.PI * n);
+  return sinc * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (THIRD_BAND_TAPS - 1)));
+});
+
+// Turns 24 kHz speech into 8 kHz phone audio. Keeps state, so chunk edges leave no trace in the result.
+export class ThirdRateDownsampler {
+  private history = new Int16Array(THIRD_BAND_TAPS - 1);
+  private phase = 0;
+
+  process(input: Int16Array): Int16Array {
+    const samples = new Int16Array(this.history.length + input.length);
+    samples.set(this.history);
+    samples.set(input, this.history.length);
+    const out = new Int16Array(Math.ceil(input.length / 3));
+    let written = 0;
+    for (let at = this.history.length + this.phase; at < samples.length; at += 3) {
+      let sum = 0;
+      for (let tap = 0; tap < THIRD_BAND_TAPS; tap++) sum += THIRD_BAND_FILTER[tap]! * samples[at - tap]!;
+      out[written++] = Math.max(-32768, Math.min(32767, Math.round(sum)));
+    }
+    this.phase = (this.phase + 3 - (input.length % 3)) % 3;
+    this.history = samples.slice(samples.length - this.history.length);
+    return out.subarray(0, written);
+  }
+}

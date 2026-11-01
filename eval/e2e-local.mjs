@@ -215,7 +215,7 @@ try {
   client.send(JSON.stringify({ type: "start", callerId: customer.phone_e164, phoneQuality: true }));
 
   await until(() => events.some((e) => e.type === "start_ack"), "start_ack");
-  await until(() => said("무엇을 드릴까요"), "greeting");
+  await until(() => said("무엇을 주문해 드릴까요"), "greeting");
   await until(() => sttStats.handshake, "stt handshake");
   assert.equal(sttStats.handshake.authorization.accessToken, "Bearer test-meta");
   assert.equal(sttStats.handshake.mode, "ENDPOINTING");

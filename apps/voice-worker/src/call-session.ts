@@ -8,10 +8,12 @@ import { MuseStt } from "./stt";
 import { PhoneTransport, SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, TypecastTts, type Tts } from "./tts";
 
-const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
+const PHRASES: Record<Language, { greeting: string; otherLanguage: string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
     greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
     otherLanguage: "한국어로 말씀하셔도 됩니다.",
+    whatToOrder: "무엇을 주문해 드릴까요?",
+    reorder: (item) => `지난번에 ${item} 드셨어요. 같은 걸로 하실까요?`,
     silence: "천천히 말씀하셔도 됩니다.",
     failSafe: "죄송합니다. 지금 연결이 원활하지 않아 상담원에게 연결해 드릴게요.",
     handoff: "상담원에게 연결해 드릴게요.",
@@ -21,6 +23,8 @@ const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silen
   en: {
     greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
     otherLanguage: "You can also speak English.",
+    whatToOrder: "What would you like to order?",
+    reorder: (item) => `Last time you had ${item}. Would you like the same?`,
     silence: "Please take your time.",
     failSafe: "I'm sorry, the connection is having trouble. Let me connect you to an agent.",
     handoff: "Let me connect you to an agent.",
@@ -29,8 +33,8 @@ const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silen
   },
 };
 const HANDOFF_TARGET = "상담원";
-const SILENCE_MS = 7000;
-const MAX_SILENCE_PROMPTS = 3;
+const SILENCE_MS = 12000;
+const MAX_SILENCE_PROMPTS = 2;
 const MAX_CALL_MS = 15 * 60_000;
 const SLOW_DOWN = 0.1;
 const TTS_DRAIN_TIMEOUT_MS = 15_000;
@@ -192,14 +196,23 @@ export class CallSession extends DurableObject<Env> {
     const language = this.session.language;
     this.say(PHRASES[language].greeting);
     this.say(PHRASES[language === "ko" ? "en" : "ko"].otherLanguage, language === "ko" ? "en" : "ko");
-    const opening = this.customer
-      ? `전화가 연결됐습니다. ${this.customer.name} 고객님께 짧게 인사하고, 최근 주문이 있는지 order_agent로 확인한 뒤 제안하세요.`
-      : "전화가 연결됐습니다. 미등록 번호입니다.";
-    this.messages.push({ role: "user", content: `[시스템 상태] ${opening}` });
-    this.enqueueTurn();
+    if (!this.customer) {
+      this.messages.push({ role: "user", content: "[시스템 상태] 전화가 연결됐습니다. 미등록 번호입니다." });
+      this.enqueueTurn();
+      return;
+    }
+    // Asked by code, not the model: the first words reach the caller at once and cannot be a narrated plan.
+    const recent = await customers.recentOrders(this.customer.id, 1).catch(() => []);
+    const lastItem = recent[0]?.items[0];
+    const lastName = language === "en" ? (lastItem?.label_en ?? lastItem?.name) : lastItem?.name;
+    const opening = lastName ? PHRASES[language].reorder(lastName) : PHRASES[language].whatToOrder;
+    this.messages.push({ role: "assistant", content: opening });
+    this.say(opening);
+    this.armSilenceTimer();
   }
 
   private onPartial(text: string): void {
+    clearTimeout(this.silenceTimer);
     this.transport.sendEvent({ type: "transcript", text, final: false });
     if (this.isPlaying() && isBargeIn(text)) this.bargeIn();
   }

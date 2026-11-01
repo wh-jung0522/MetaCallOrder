@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 import { CONVERSATION_PROMPT, ORDER_PROMPT } from "./prompts";
-import { sanitizeForTts, takeSentences } from "./text";
+import { sanitizeForTts } from "./text";
 import { executeOrderTool, ORDER_TOOLS, type OrderToolContext } from "./tools";
 
 export type ChatClient = Pick<OpenAI["chat"]["completions"], "create">;
@@ -86,7 +86,7 @@ async function runOrderAgent(instruction: string, ctx: OrderToolContext, config:
         model: config.model,
         messages,
         tools: ORDER_TOOLS,
-        reasoning_effort: "low",
+        reasoning_effort: "minimal",
         response_format: ORDER_RESULT_FORMAT,
       } as OpenAI.ChatCompletionCreateParamsNonStreaming,
       { signal: AbortSignal.any([signal, AbortSignal.timeout(LLM_TIMEOUT_MS)]) },
@@ -169,8 +169,8 @@ export async function runConversationTurn(
     }
 
     if (!calls.length) {
-      const { sentences, rest } = takeSentences(text);
-      [...sentences, rest].forEach(say);
+      // One TTS request for the whole reply, so there is no gap between its sentences.
+      say(text);
       messages.push({ role: "assistant", content: text });
       // The model sometimes gives the arrival time and forgets end_call, which would leave the caller on the line.
       return ctx.placedOrder ? { type: "end_call" } : null;

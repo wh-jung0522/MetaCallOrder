@@ -206,12 +206,12 @@ const toolDelta = (name: string, args: object) => ({ choices: [{ delta: { tool_c
 describe("conversation turn", () => {
   const hooks = (spoken: string[]) => ({ speak: (text: string) => void spoken.push(text), onToolCall() {}, onFirstToken() {}, onUsage() {} });
 
-  it("speaks streamed sentences", async () => {
+  it("speaks the whole reply in one go", async () => {
     const { ctx } = fixture();
     const spoken: string[] = [];
     const client = fakeClient([[{ choices: [{ delta: { content: "안녕하세요. 무엇을" } }] }, { choices: [{ delta: { content: " 드릴까요?" } }] }]]);
     await runConversationTurn([], ctx, { client, model: "m" }, hooks(spoken), new AbortController().signal);
-    expect(spoken).toEqual(["안녕하세요.", "무엇을 드릴까요?"]);
+    expect(spoken).toEqual(["안녕하세요. 무엇을 드릴까요?"]);
   });
 
   it("delegates, says the filler first, reads the recap verbatim and stops", async () => {

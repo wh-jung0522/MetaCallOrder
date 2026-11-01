@@ -29,14 +29,33 @@ describe("PhoneTransport", () => {
     expect(Math.abs(got[0]![100]! - 8000)).toBeLessThan(400);
   });
 
-  it("sends 24 kHz speech as 8 kHz mulaw frames with no sample lost between chunks", () => {
+  it("sends speech only as whole 20 ms frames, at speaking pace, padding the tail", () => {
+    vi.useFakeTimers();
     const socket = fakeSocket();
     const transport = new PhoneTransport(socket as unknown as WebSocket, "+821000000001");
-    transport.playAudio(new Int16Array(500).fill(1000), 24000);
-    transport.playAudio(new Int16Array(460).fill(1000), 24000);
+    transport.playAudio(new Int16Array(12000).fill(1000)); // 500 ms
+    transport.playAudio(new Int16Array(100).fill(1000));
+    vi.advanceTimersByTime(40);
+    expect(socket.sent.length).toBeLessThanOrEqual(13); // only 200 ms ahead of real time
+    vi.advanceTimersByTime(2000);
     const bytes = socket.sent.map((message) => atob(message.media!.payload).length);
-    expect(bytes.reduce((a, b) => a + b, 0)).toBe(320);
-    expect(Math.max(...bytes)).toBe(160);
+    expect(new Set(bytes)).toEqual(new Set([160]));
+    expect(bytes.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(4033);
+    vi.useRealTimers();
+  });
+
+  it("drops queued speech when the caller interrupts", () => {
+    vi.useFakeTimers();
+    const socket = fakeSocket();
+    const transport = new PhoneTransport(socket as unknown as WebSocket, "+821000000001");
+    transport.playAudio(new Int16Array(24000).fill(1000));
+    vi.advanceTimersByTime(40);
+    transport.clearPlayback();
+    const count = socket.sent.length;
+    vi.advanceTimersByTime(1000);
+    expect(socket.sent.at(-1)!.event).toBe("clear");
+    expect(socket.sent.length).toBe(count);
+    vi.useRealTimers();
   });
 
   it("reports the caller hanging up and passes key presses", () => {

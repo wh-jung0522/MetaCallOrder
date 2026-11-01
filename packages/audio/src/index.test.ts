@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mulawDecode, mulawEncode, resample } from "./index";
+import { mulawDecode, mulawEncode, resample, ThirdRateDownsampler } from "./index";
 
 describe("mulaw", () => {
   it("round-trips within quantization error", () => {
@@ -38,5 +38,25 @@ describe("resample", () => {
     expect(Array.from(out)).toEqual([1, 2]);
     expect(out).not.toBe(input);
     expect(resample(new Int16Array(0), 8000, 16000).length).toBe(0);
+  });
+});
+
+describe("ThirdRateDownsampler", () => {
+  const tone = (hz: number, length: number) => Int16Array.from({ length }, (_, i) => Math.round(10000 * Math.sin((2 * Math.PI * hz * i) / 24000)));
+  const rms = (pcm: Int16Array) => Math.sqrt(pcm.reduce((sum, value) => sum + value * value, 0) / pcm.length);
+
+  it("keeps speech and removes what would alias at 8 kHz", () => {
+    expect(rms(new ThirdRateDownsampler().process(tone(1000, 24000)).subarray(100))).toBeGreaterThan(6500);
+    expect(rms(new ThirdRateDownsampler().process(tone(6000, 24000)).subarray(100))).toBeLessThan(300);
+  });
+
+  it("gives the same result however the audio is chunked", () => {
+    const whole = new ThirdRateDownsampler().process(tone(1000, 2400));
+    const chunked = new ThirdRateDownsampler();
+    const parts = [1, 2, 500, 7, 890, 1000].flatMap((size, index, sizes) => {
+      const start = sizes.slice(0, index).reduce((a, b) => a + b, 0);
+      return [...chunked.process(tone(1000, 2400).subarray(start, start + size))];
+    });
+    expect(parts).toEqual([...whole]);
   });
 });
