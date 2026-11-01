@@ -54,7 +54,13 @@ export interface AgentHooks {
   onToolCall(name: string, args: unknown, result: unknown): void;
   onFirstToken(): void;
   onUsage(usage: { prompt_tokens: number; completion_tokens: number }): void;
+  // For the per-call log. Summaries only: the prompts are the same on every call.
+  onLlmRequest?(request: { agent: AgentName; step: number; messages: number; last: unknown }): void;
+  onLlmResponse?(response: { agent: AgentName; step: number; text: string | null; tool_calls: { name: string; arguments: string }[]; ms: number; usage: unknown }): void;
+  onConversationTool?(name: string, args: string, result: string): void;
 }
+
+export type AgentName = "conversation" | "order";
 
 export type TurnAction = { type: "handoff"; reason: string } | { type: "end_call" } | null;
 
@@ -81,6 +87,8 @@ async function runOrderAgent(instruction: string, ctx: OrderToolContext, config:
     { role: "user", content: instruction },
   ];
   for (let step = 0; step < MAX_SUB_STEPS; step++) {
+    hooks.onLlmRequest?.({ agent: "order", step, messages: messages.length, last: messages.at(-1)?.content });
+    const requestedAt = Date.now();
     const response = await config.client.create(
       {
         model: config.model,
@@ -93,6 +101,14 @@ async function runOrderAgent(instruction: string, ctx: OrderToolContext, config:
     );
     if (response.usage) hooks.onUsage(response.usage);
     const message = response.choices[0]!.message;
+    hooks.onLlmResponse?.({
+      agent: "order",
+      step,
+      text: message.content,
+      tool_calls: (message.tool_calls ?? []).flatMap((call) => (call.type === "function" ? [{ name: call.function.name, arguments: call.function.arguments }] : [])),
+      ms: Date.now() - requestedAt,
+      usage: response.usage ?? null,
+    });
     if (!message.tool_calls?.length) return message.content ?? JSON.stringify({ status: "error", summary: "응답 없음" });
     messages.push(message);
     for (const call of message.tool_calls) {
@@ -134,6 +150,9 @@ export async function runConversationTurn(
   };
 
   for (let step = 0; step < MAX_MAIN_STEPS; step++) {
+    hooks.onLlmRequest?.({ agent: "conversation", step, messages: messages.length + 2, last: messages.at(-1)?.content });
+    const requestedAt = Date.now();
+    let usage: unknown = null;
     const stream = await config.client.create(
       {
         model: config.model,
@@ -150,7 +169,10 @@ export async function runConversationTurn(
     let first = true;
     const calls: { id: string; name: string; arguments: string }[] = [];
     for await (const chunk of stream) {
-      if (chunk.usage) hooks.onUsage(chunk.usage);
+      if (chunk.usage) {
+        usage = chunk.usage;
+        hooks.onUsage(chunk.usage);
+      }
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
       if (first && (delta.content || delta.tool_calls)) {
@@ -167,6 +189,8 @@ export async function runConversationTurn(
         slot.arguments += call.function?.arguments ?? "";
       }
     }
+
+    hooks.onLlmResponse?.({ agent: "conversation", step, text, tool_calls: calls.map(({ name, arguments: args }) => ({ name, arguments: args })), ms: Date.now() - requestedAt, usage });
 
     if (!calls.length) {
       // One TTS request for the whole reply, so there is no gap between its sentences.
@@ -200,6 +224,7 @@ export async function runConversationTurn(
       } else {
         content = JSON.stringify({ error: `알 수 없는 도구: ${call.name}` });
       }
+      hooks.onConversationTool?.(call.name, call.arguments, content);
       messages.push({ role: "tool", tool_call_id: call.id, content });
     }
 

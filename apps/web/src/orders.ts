@@ -1,9 +1,11 @@
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useState } from "react";
 import type { T } from "./i18n";
 import { supabase } from "./supabase";
 
 export interface OrderRow {
   id: string;
+  customer_id: string;
   status: "pending" | "accepted" | "rejected" | "cancelled";
   total: number;
   delivery_address: string;
@@ -14,10 +16,11 @@ export interface OrderRow {
 }
 
 const REFRESH_MS = 30_000;
-const SELECT = "id, status, total, delivery_address, created_at, items, stores(name), customers(name)";
+const SELECT = "id, customer_id, status, total, delivery_address, created_at, items, stores(name), customers(name)";
 
-// RLS scopes both the query and the Realtime feed to what this user may see, so no filter is needed.
-export function useOrders() {
+// RLS scopes both the query and the Realtime feed to what this client may see.
+export function useOrders(db: SupabaseClient = supabase, customerIds?: string[]) {
+  const scope = customerIds?.join();
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -25,17 +28,18 @@ export function useOrders() {
   const [newestId, setNewestId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data, error: failure } = await supabase.from("orders").select(SELECT).order("created_at", { ascending: false }).limit(50);
+    const query = db.from("orders").select(SELECT);
+    const { data, error: failure } = await (scope === undefined ? query : query.in("customer_id", scope.split(","))).order("created_at", { ascending: false }).limit(50);
     setLoading(false);
     if (failure) setError(failure.message);
     else setOrders(data as unknown as OrderRow[]);
-  }, []);
+  }, [db, scope]);
 
   useEffect(() => {
     void load();
     // Realtime drops events while it wakes up or reconnects, and a missed order is the one failure a shop cannot notice.
     const timer = setInterval(load, REFRESH_MS);
-    const channel = supabase
+    const channel = db
       .channel("orders")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (change) => {
         if (change.eventType === "INSERT") setNewestId((change.new as { id: string }).id);
@@ -44,11 +48,24 @@ export function useOrders() {
       .subscribe((status) => setLive(status === "SUBSCRIBED"));
     return () => {
       clearInterval(timer);
-      void supabase.removeChannel(channel);
+      void db.removeChannel(channel);
     };
-  }, [load]);
+  }, [db, load]);
 
   return { orders, error, loading, live, newestId, reload: load };
+}
+
+// Which customers or stores this login is tied to. Null while it is still being checked.
+export function useLinkedIds(session: Session | null | undefined, table: "guardians" | "stores", idColumn: string, userColumn: string): string[] | null {
+  const [ids, setIds] = useState<string[] | null>(null);
+  const userId = session?.user.id;
+  useEffect(() => {
+    if (session === undefined) return;
+    if (!userId) return setIds([]);
+    setIds(null);
+    supabase.from(table).select(idColumn).eq(userColumn, userId).then(({ data }) => setIds(((data ?? []) as unknown as Record<string, string>[]).map((row) => row[idColumn]!)));
+  }, [session === undefined, userId, table, idColumn, userColumn]);
+  return ids;
 }
 
 export function won(amount: number, t: T): string {

@@ -2,10 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const DB_TIMEOUT_MS = 8000;
 
-export function createDb(env: Env) {
+export function createDb(env: Env, timeoutMs = DB_TIMEOUT_MS) {
   return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
-    global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(DB_TIMEOUT_MS) }) },
+    global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) },
   });
 }
 

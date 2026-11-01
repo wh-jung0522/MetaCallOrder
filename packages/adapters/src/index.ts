@@ -265,6 +265,8 @@ export class SupabaseMerchantAdapter implements MerchantAdapter {
   }
 }
 
+export const FIRST_TIME_CALLER_NAME = "고객";
+
 export class CustomerRepository {
   constructor(private db: SupabaseClient) {}
 
@@ -272,6 +274,15 @@ export class CustomerRepository {
     const { data, error } = await this.db.from("customers").select("*").eq("phone_e164", phone).maybeSingle();
     if (error) throw error;
     return data as Customer | null;
+  }
+
+  // Keeps an existing row as it is, so a repeat caller's name and address are never reset.
+  async ensureCaller(phone: string): Promise<void> {
+    const { error } = await this.db.from("customers").upsert(
+      { phone_e164: phone, name: FIRST_TIME_CALLER_NAME, default_address: "행복동 12번지", lat: 37.5665, lng: 126.978, preferred_speech_rate: 0.95, is_demo: false },
+      { onConflict: "phone_e164", ignoreDuplicates: true },
+    );
+    if (error) throw error;
   }
 
   async listDemo(): Promise<Pick<Customer, "name" | "phone_e164">[]> {
@@ -328,8 +339,9 @@ export class CustomerRepository {
 export class CallRepository {
   constructor(private db: SupabaseClient) {}
 
-  async start(callSid: string, customerId: string | null): Promise<void> {
-    const { error } = await this.db.from("calls").upsert({ call_sid: callSid, customer_id: customerId });
+  async start(callSid: string, customerId: string | null, channel: "simulator" | "phone"): Promise<void> {
+    // The simulator picks its own call id, so reusing one must never clear customer_id, which would make that call public.
+    const { error } = await this.db.from("calls").upsert({ call_sid: callSid, customer_id: customerId, channel }, { onConflict: "call_sid", ignoreDuplicates: true });
     if (error) throw error;
     if (!customerId) return;
     const { error: consentError } = await this.db.from("consents").insert(
@@ -343,6 +355,11 @@ export class CallRepository {
       .from("calls")
       .update({ ...fields, ended_at: new Date().toISOString() })
       .eq("call_sid", callSid);
+    if (error) throw error;
+  }
+
+  async saveLogs(rows: unknown[]): Promise<void> {
+    const { error } = await this.db.from("call_logs").insert(rows);
     if (error) throw error;
   }
 }

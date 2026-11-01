@@ -20,8 +20,30 @@ const db = {
   menu_items: [{ id: "m1", store_id: "s1", name: "순대국밥", aliases: ["국밥"], price: 9000, options: [], is_available: true }],
   orders: [],
   calls: [],
+  call_logs: [],
   consents: [],
 };
+const audioFiles = new Map();
+const OLD_AUDIO = { name: "old.wav", created_at: "2020-01-01T00:00:00Z" };
+audioFiles.set(OLD_AUDIO.name, Buffer.alloc(0));
+const removedAudio = [];
+
+// Just enough of the Storage API: upload, list and remove.
+function storage(req, res, body) {
+  const json = (data, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
+  if (req.url.startsWith("/storage/v1/object/list/call-audio")) {
+    return json([...audioFiles.keys()].map((name) => ({ name, created_at: name === OLD_AUDIO.name ? OLD_AUDIO.created_at : new Date().toISOString() })));
+  }
+  if (req.method === "DELETE") {
+    const { prefixes } = JSON.parse(body.toString());
+    prefixes.forEach((name) => { audioFiles.delete(name); removedAudio.push(name); });
+    return json([]);
+  }
+  const name = decodeURIComponent(req.url.split("/call-audio/")[1]);
+  if (req.headers.authorization !== "Bearer test-service") return json({ message: "unauthorized" }, 401);
+  audioFiles.set(name, body);
+  json({ Key: `call-audio/${name}` });
+}
 
 // Just enough PostgREST for this flow: eq/neq/in/gte filters, upsert, and single-object responses.
 function rest(req, res, body) {
@@ -48,7 +70,7 @@ function rest(req, res, body) {
     const inserted = [];
     for (const row of rows) {
       if (key && db[table].some((existing) => existing[key] === row[key])) continue;
-      const stored = { id: crypto.randomUUID(), status: "pending", ...row };
+      const stored = { id: crypto.randomUUID(), status: "pending", ...(table === "customers" ? { is_demo: false } : {}), ...row };
       db[table].push(stored);
       inserted.push(stored);
     }
@@ -105,14 +127,18 @@ function chat(res, body) {
 }
 
 const providers = createServer((req, res) => {
-  let body = "";
-  req.on("data", (part) => (body += part));
-  req.on("end", () => (req.url.includes("/chat/completions") ? chat(res, body) : rest(req, res, body)));
+  const parts = [];
+  req.on("data", (part) => parts.push(part));
+  req.on("end", () => {
+    const body = Buffer.concat(parts);
+    if (req.url.startsWith("/storage/")) return storage(req, res, body);
+    return req.url.includes("/chat/completions") ? chat(res, body.toString()) : rest(req, res, body.toString());
+  });
 });
 
 let stt = null;
 const sttStats = { handshake: null, voicedFrames: 0 };
-const ttsStats = { auth: null, configs: [] };
+const ttsStats = { auth: null, configs: [], refuse: false };
 const sttServer = new WebSocketServer({ noServer: true });
 const ttsServer = new WebSocketServer({ noServer: true });
 const TTS_MS = 400;
@@ -143,6 +169,10 @@ ttsServer.on("connection", (socket, req) => {
       configs.set(message.stream_id, message);
       ttsStats.configs.push(message);
     }
+    if (message.text_end && ttsStats.refuse) {
+      socket.send(JSON.stringify({ stream_id: message.stream_id, error_message: "refused for key test-tts" }));
+      return socket.send(JSON.stringify({ stream_id: message.stream_id, terminated: true }));
+    }
     if (message.text_end) {
       // An odd-length first chunk proves split samples get re-joined.
       const samples = Buffer.alloc(Math.floor((24000 * TTS_MS) / 1000) * 2, 1);
@@ -164,9 +194,9 @@ await new Promise((resolve) => providers.listen(FAKE_PORT, resolve));
 const vars = {
   META_API_KEY: "test-meta", META_BASE_URL: `${fake}/v1`, META_STT_URL: `${fake}/stt`,
   TTS_PROVIDER: "soniox", TTS_API_KEY: "test-tts", TTS_URL: `${fake}/tts`, SUPABASE_URL: fake, SUPABASE_SERVICE_ROLE_KEY: "test-service",
-  ALLOWED_ORIGINS: ORIGIN, SIM_ACCESS_CODE: "code",
+  ALLOWED_ORIGINS: ORIGIN, SIM_ACCESS_CODE: "code", PHONE_WEBHOOK_TOKEN: "test-phone",
 };
-const worker = spawn("pnpm", ["exec", "wrangler", "dev", "--port", String(WORKER_PORT), ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])], {
+const worker = spawn("pnpm", ["exec", "wrangler", "dev", "--port", String(WORKER_PORT), "--test-scheduled", ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])], {
   cwd: new URL("../apps/voice-worker/", import.meta.url), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, detached: true,
 });
 let workerLog = "";
@@ -255,7 +285,103 @@ try {
   assert.ok(db.calls[0].cost_usd > 0);
   assert.ok(db.calls[0].transcript.some((line) => line.role === "caller" && line.text === "네"));
   assert.ok(db.consents.length >= 2);
-  console.log(`e2e ok: order ${db.orders[0].total}원, ${audioBytes} audio bytes, cost $${db.calls[0].cost_usd}`);
+
+  // Every log row is written, in order, in one insert, with nothing secret in it.
+  await until(() => db.call_logs.length && audioFiles.has("e2e-call-0001.wav"), "logs and audio written");
+  const logs = db.call_logs.filter((row) => row.call_sid === "e2e-call-0001");
+  assert.deepEqual(logs.map((row) => row.seq), logs.map((_, index) => index), "seq runs in order with no gaps");
+  const kinds = new Set(logs.map((row) => row.kind));
+  for (const kind of ["call_start", "stt_speech_start", "speech_end", "stt_final", "llm_request", "llm_response", "tool_call", "say", "tts_start", "latency", "usage", "call_end", "audio"]) assert.ok(kinds.has(kind), `log has ${kind}`);
+  const llm = logs.filter((row) => row.kind === "llm_response");
+  assert.ok(llm.some((row) => row.payload.agent === "conversation"), "conversation reply logged");
+  assert.ok(llm.some((row) => row.payload.agent === "order"), "order agent logged");
+  assert.ok(logs.some((row) => row.kind === "tool_call" && row.payload.tool === "place_order" && row.payload.result.order_id), "tool result logged");
+  assert.ok(logs.some((row) => row.kind === "tool_call" && row.payload.tool === "order_agent"), "conversation tool logged");
+  assert.ok(logs.some((row) => row.kind === "stt_final" && row.payload.ignored === true), "the skipped backchannel is logged");
+  assert.ok(logs.find((row) => row.kind === "stt_final").payload.partials >= 1, "partials counted");
+  const secrets = JSON.stringify(logs);
+  for (const secret of ["test-meta", "test-tts", "test-service", "accessToken", "authorization", "test-phone"]) assert.ok(!secrets.includes(secret), `${secret} must not be logged`);
+
+  // The WAV is stereo on the call clock: the agent's voice starts where the log says it does.
+  const wav = audioFiles.get("e2e-call-0001.wav");
+  assert.equal(wav.toString("latin1", 0, 4), "RIFF");
+  assert.equal(wav.readUInt16LE(22), 2);
+  assert.equal(wav.readUInt32LE(24), 8000);
+  assert.equal(wav.readUInt32LE(40), wav.length - 44);
+  const sample = (channel, ms) => wav.readInt16LE(44 + Math.floor(ms * 8) * 4 + channel * 2);
+  const started = logs.filter((row) => row.kind === "tts_start");
+  assert.ok(started.length >= 3, "each sentence has its place in the audio");
+  assert.equal(sample(1, started[0].payload.audio_ms + 50), 257, "agent voice at the logged moment");
+  assert.ok(started[0].payload.audio_ms > 0 ? sample(1, started[0].payload.audio_ms - 5) === 0 : true, "silence before the first sentence");
+  const audioEntry = logs.find((row) => row.kind === "audio");
+  assert.equal(audioEntry.payload.path, "e2e-call-0001.wav");
+  assert.ok(Math.abs(wav.readUInt32LE(40) / 32000 - audioEntry.payload.seconds) < 0.01, "file length matches the log");
+  // The 1000-valued caller frame went to the left channel only.
+  let callerSamples = 0;
+  for (let at = 44; at + 3 < wav.length; at += 4) if (wav.readInt16LE(at) === 1000) callerSamples++;
+  assert.equal(callerSamples, 160);
+  assert.equal(db.calls[0].channel, "simulator");
+
+  // The daily cron removes old audio and leaves recent audio alone.
+  assert.equal((await fetch(`${base}/__scheduled?cron=0+3+*+*+*`)).status, 200);
+  await until(() => removedAudio.includes(OLD_AUDIO.name), "old audio purged");
+  assert.ok(audioFiles.has("e2e-call-0001.wav"));
+
+  // A refused voice must not end a simulator call: the screen is told, the call carries on in text, and the failure is logged.
+  ttsStats.refuse = true;
+  stt = null;
+  const silent = [];
+  const second = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}/sim/stream?callId=e2e-call-0002&code=code`, { headers: { origin: ORIGIN } });
+  second.on("message", (data, isBinary) => { if (!isBinary) silent.push(JSON.parse(data.toString())); });
+  await new Promise((resolve, reject) => { second.on("open", resolve); second.on("error", reject); });
+  second.send(JSON.stringify({ type: "start", callerId: customer.phone_e164 }));
+  await until(() => silent.some((e) => e.type === "voice_off"), "voice off event");
+  await until(() => stt, "second stt");
+  await sleep(300);
+  const repliesBefore = silent.filter((e) => e.type === "assistant_text").length;
+  speak("여보세요 들리세요");
+  await until(() => silent.filter((e) => e.type === "assistant_text").length > repliesBefore, "text reply after the voice went off");
+  assert.ok(!silent.some((e) => e.type === "hangup" || e.type === "fail_safe"), "call still up");
+  second.close();
+  await until(() => db.call_logs.some((row) => row.call_sid === "e2e-call-0002" && row.kind === "tts_off"), "tts failure logged");
+  assert.ok(!JSON.stringify(db.call_logs.filter((row) => row.call_sid === "e2e-call-0002")).includes("test-tts"), "provider errors are scrubbed");
+  ttsStats.refuse = false;
+
+  // A first-time caller is registered and privately. A blocked caller id still connects, as a phone call, with no customer.
+  const callIn = async (from) => {
+    const body = new FormData();
+    body.set("From", from);
+    const response = await fetch(`${base}/phone/voice`, { method: "POST", headers: { "x-callorder-token": "test-phone" }, body });
+    assert.equal(response.status, 200);
+    const xml = await response.text();
+    assert.ok(xml.includes("<Connect><Stream"), xml);
+    return xml.match(/url="wss:\/\/[^/]+([^"]+)"/)[1].replaceAll("&amp;", "&");
+  };
+  await callIn("010-5555-0001");
+  const created = db.customers.find((row) => row.phone_e164 === "+821055550001");
+  assert.equal(created.name, "고객");
+  assert.equal(created.is_demo, false);
+  await callIn("010-5555-0001");
+  assert.equal(db.customers.filter((row) => row.phone_e164 === "+821055550001").length, 1, "a repeat caller is not added twice");
+  await callIn(customer.phone_e164);
+  assert.equal(db.customers.find((row) => row.id === "c1").name, "김순자", "an existing customer is left alone");
+
+  const count = db.customers.length;
+  const path = await callIn("anonymous");
+  assert.equal(db.customers.length, count);
+  stt = null;
+  const blockedSid = new URLSearchParams(path.split("?")[1]).get("callId");
+  const phone = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}${path}`);
+  await new Promise((resolve, reject) => { phone.on("open", resolve); phone.on("error", reject); });
+  phone.send(JSON.stringify({ event: "start" }));
+  await until(() => db.calls.some((row) => row.call_sid === blockedSid), "blocked call started");
+  const blocked = db.calls.find((row) => row.call_sid === blockedSid);
+  assert.equal(blocked.channel, "phone", "a blocked caller must stay a private phone call");
+  assert.equal(blocked.customer_id, null);
+  phone.send(JSON.stringify({ event: "stop" }));
+  await until(() => db.call_logs.some((row) => row.call_sid === blockedSid && row.kind === "call_end"), "blocked call logged");
+
+  console.log(`e2e ok: order ${db.orders[0].total}원, ${audioBytes} audio bytes, ${logs.length} log rows, ${wav.length} byte recording, cost $${db.calls[0].cost_usd}`);
 } catch (error) {
   console.error(error);
   console.error(workerLog.slice(-3000));

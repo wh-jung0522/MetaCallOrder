@@ -1,12 +1,22 @@
-import { CallRepository, CustomerRepository, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
+import enGreeting from "./greetings/en-greeting.pcm";
+import enOther from "./greetings/en-other.pcm";
+import koGreeting from "./greetings/ko-greeting.pcm";
+import koOther from "./greetings/ko-other.pcm";
+import { CallRepository, CustomerRepository, FIRST_TIME_CALLER_NAME, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
 import { isBargeIn, isHandoffRequest, isRepeatRequest, nextLanguage, OrderSession, runConversationTurn, type Language, type OrderToolContext, type TurnAction } from "@callorder/agents";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
 import { createDb, missingSecrets, type Env } from "./env";
 import { MuseStt } from "./stt";
+import { AUDIO_BUCKET, CallRecorder, RECORD_RATE } from "./recording";
 import { PhoneTransport, SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, TypecastTts, type Tts } from "./tts";
+
+// Recorded by eval/make-greetings.mjs in the TTS_VOICE voice, so the call opens instantly.
+const RECORDED: Record<string, ArrayBuffer> = {
+  "ko-greeting": koGreeting, "ko-other": koOther, "en-greeting": enGreeting, "en-other": enOther,
+};
 
 const PHRASES: Record<Language, { greeting: string; otherLanguage: string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
@@ -38,6 +48,17 @@ const MAX_SILENCE_PROMPTS = 2;
 const MAX_CALL_MS = 15 * 60_000;
 const SLOW_DOWN = 0.1;
 const TTS_DRAIN_TIMEOUT_MS = 15_000;
+const CALLER_RATE = 16000;
+// Hangup has already happened by then, so this only limits how long the object stays busy with a 30 MB file.
+const UPLOAD_TIMEOUT_MS = 60_000;
+// Worst case 2000 rows x 4000 UTF-16 characters = 16 MB, on top of the audio ceiling in recording.ts. A real call is well under 1 MB.
+const MAX_LOG_ROWS = 2000;
+const MAX_LOG_PAYLOAD_CHARS = 4000;
+
+function clip(payload: Record<string, unknown>): Record<string, unknown> {
+  const text = JSON.stringify(payload);
+  return text.length <= MAX_LOG_PAYLOAD_CHARS ? payload : { clipped: true, text: text.slice(0, MAX_LOG_PAYLOAD_CHARS) };
+}
 
 // USD. Meta: dev.meta.ai/docs/pricing-rate-limits. Soniox: soniox.com/pricing ($4/1M input tokens, ~0.3 token per char, ~$0.70/hour of audio).
 const PRICE = { sttPerSecond: 0.18 / 3600, llmInput: 1.25 / 1e6, llmOutput: 4.25 / 1e6, ttsPerChar: (4 / 1e6) * 0.3, ttsPerSecond: 0.7 / 3600 };
@@ -82,6 +103,13 @@ export class CallSession extends DurableObject<Env> {
   private outcome = "abandoned";
   private handoffReason: string | null = null;
   private ended = false;
+  private dialedLanguage: Language | null = null;
+  private recorder = new CallRecorder(0);
+  private logs: { call_sid: string; seq: number; at: string; ms: number; kind: string; payload: Record<string, unknown> }[] = [];
+  private partials = 0;
+  // Sentences sent to TTS and not heard yet, so the first chunk of each can be matched to its place in the audio.
+  private unheard: number[] = [];
+  private voiceIsOff = false;
 
   override async fetch(request: Request): Promise<Response> {
     const pair = new WebSocketPair();
@@ -90,15 +118,18 @@ export class CallSession extends DurableObject<Env> {
     server.binaryType = "arraybuffer";
     server.accept();
     const url = new URL(request.url);
+    // A US number opens in English whoever is calling.
+    const lang = url.searchParams.get("lang");
+    this.dialedLanguage = lang === "en" || lang === "ko" ? lang : null;
     this.callId = url.searchParams.get("callId")!;
     server.addEventListener("message", (event) => {
       if (this.transport || typeof event.data !== "string") return;
       const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string };
-      // The Worker signed this caller id before routing here; the simulator states its own.
-      const phoneCaller = url.pathname === "/phone/stream" ? url.searchParams.get("caller") : null;
-      if (phoneCaller ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
-      const callerId = phoneCaller ?? start.callerId!;
-      this.begin(server, callerId, phoneCaller ? new PhoneTransport(server, callerId) : new SimulatorTransport(server, callerId)).catch((error) => {
+      // The Worker signed this caller id before routing here, and it is empty when the number is blocked; the simulator states its own.
+      const isPhone = url.pathname === "/phone/stream";
+      if (isPhone ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
+      const callerId = isPhone ? (url.searchParams.get("caller") ?? "") : start.callerId!;
+      this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId) : new SimulatorTransport(server, callerId)).catch((error) => {
         console.error("call start failed", error);
         server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
         server.close(1011, "start failed");
@@ -116,6 +147,7 @@ export class CallSession extends DurableObject<Env> {
     }
     this.transport = transport;
     this.startedAt = Date.now();
+    this.recorder = new CallRecorder(this.startedAt);
 
     this.db = createDb(this.env);
     this.calls = new CallRepository(this.db);
@@ -123,10 +155,10 @@ export class CallSession extends DurableObject<Env> {
     this.llm = new OpenAI({ apiKey: this.env.META_API_KEY, baseURL: this.env.META_BASE_URL, maxRetries: 1 });
 
     // Anyone with the simulator can pick any caller id, so real customers must stay out of reach there. A phone caller id comes from the carrier.
-    const found = await customers.findByPhone(callerId);
+    const found = callerId ? await customers.findByPhone(callerId) : null;
     this.customer = transport.kind === "phone" || found?.is_demo ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
-    this.session.language = callerId.startsWith("+82") ? "ko" : "en";
+    this.session.language = this.dialedLanguage ?? (!callerId || callerId.startsWith("+82") ? "ko" : "en");
 
     this.tools = {
       callSid: this.callId,
@@ -141,6 +173,7 @@ export class CallSession extends DurableObject<Env> {
       onOrderPlaced: (order, storeName) => this.onOrderPlaced(customers, order, storeName),
     };
 
+    this.log("call_start", { channel: transport.kind, language: this.session.language, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.sendEvent({ type: "start_ack", callId: this.callId, sampleRate: TTS_SAMPLE_RATE, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.onHangup(() => void this.finish());
     transport.onDtmf((digit) => this.onDtmf(digit));
@@ -152,22 +185,35 @@ export class CallSession extends DurableObject<Env> {
         this.onFinal(text);
       });
     }
-    transport.onAudio((pcm) => this.stt?.sendAudio(pcm));
+    transport.onAudio((pcm) => {
+      this.recorder.addCaller(pcm, CALLER_RATE);
+      this.stt?.sendAudio(pcm);
+    });
     this.callTimer = setTimeout(() => this.endWith("max_duration"), MAX_CALL_MS);
 
-    await this.calls.start(this.callId, this.customer?.id ?? null);
+    await this.calls.start(this.callId, this.customer?.id ?? null, transport.kind);
 
     const ttsOptions = { url: this.env.TTS_URL, apiKey: this.env.TTS_API_KEY, model: this.env.TTS_MODEL, voice: this.env.TTS_VOICE };
     const ttsHandlers = {
       onAudio: (pcm: Int16Array) => this.onTtsAudio(pcm),
-      onFirstChunk: () => this.mark("tts_first_chunk_ms"),
-      onFailure: (reason: string) => this.failSafe(reason),
+      onFirstChunk: () => {
+        this.mark("tts_first_chunk_ms");
+        const say = this.unheard.shift();
+        if (say !== undefined) this.log("tts_start", { say, audio_ms: this.recorder.agentStartMs() });
+      },
+      // A simulator caller can still read the replies. A phone caller with no voice has nothing left.
+      onFailure: (reason: string) => (transport.kind === "simulator" ? this.voiceOff(reason) : this.failSafe(reason)),
     };
     if (this.env.TTS_PROVIDER === "typecast") this.tts = new TypecastTts(ttsHandlers, ttsOptions);
     if (this.env.TTS_PROVIDER === "soniox") {
       const tts = new SonioxTts(ttsHandlers, ttsOptions);
-      await tts.connect();
-      this.tts = tts;
+      try {
+        await tts.connect();
+        this.tts = tts;
+      } catch (error) {
+        if (transport.kind !== "simulator") throw error;
+        this.voiceOff(`tts connect: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     this.stt = new MuseStt({
@@ -181,6 +227,7 @@ export class CallSession extends DurableObject<Env> {
         this.speechEndedAt = Date.now();
         this.current = {};
         this.mark("speech_end_ms");
+        this.log("speech_end");
       },
       onFinal: (text) => this.onFinal(text),
       onFailure: (reason) => this.failSafe(reason),
@@ -194,8 +241,9 @@ export class CallSession extends DurableObject<Env> {
     });
 
     const language = this.session.language;
-    this.say(PHRASES[language].greeting);
-    this.say(PHRASES[language === "ko" ? "en" : "ko"].otherLanguage, language === "ko" ? "en" : "ko");
+    const other = language === "ko" ? "en" : "ko";
+    this.say(PHRASES[language].greeting, language, `${language}-greeting`);
+    this.say(PHRASES[other].otherLanguage, other, `${other}-other`);
     if (!this.customer) {
       this.messages.push({ role: "user", content: "[시스템 상태] 전화가 연결됐습니다. 미등록 번호입니다." });
       this.enqueueTurn();
@@ -213,6 +261,7 @@ export class CallSession extends DurableObject<Env> {
 
   private onPartial(text: string): void {
     clearTimeout(this.silenceTimer);
+    this.partials++;
     this.transport.sendEvent({ type: "transcript", text, final: false });
     if (this.isPlaying() && isBargeIn(text)) this.bargeIn();
   }
@@ -222,6 +271,8 @@ export class CallSession extends DurableObject<Env> {
     this.bargedIn = true;
     this.turnAbort?.abort();
     this.tts.cancel();
+    this.unheard = [];
+    this.recorder.stopAgent();
     this.transport.clearPlayback();
     this.playingUntil = 0;
     this.session.noteInterrupted();
@@ -236,7 +287,10 @@ export class CallSession extends DurableObject<Env> {
     // Endpointing delay can deliver it after playback ended, hence the check from when the speech began.
     const overlapped = this.isPlaying() || this.speechOverlappedPlayback;
     this.speechOverlappedPlayback = false;
-    if (overlapped && !isBargeIn(utterance)) return;
+    const ignored = overlapped && !isBargeIn(utterance);
+    this.log("stt_final", { text: utterance, partials: this.partials, ignored });
+    this.partials = 0;
+    if (ignored) return;
     if (this.isPlaying()) this.bargeIn();
     this.bargedIn = false;
     this.mark("final_ms");
@@ -296,6 +350,9 @@ export class CallSession extends DurableObject<Env> {
         {
           speak: (text) => this.say(text),
           onToolCall: (tool, args, result) => this.emit("tool_call", { tool, args, result }),
+          onConversationTool: (tool, args, result) => this.log("tool_call", { agent: "conversation", tool, args, result }),
+          onLlmRequest: (request) => this.log("llm_request", request),
+          onLlmResponse: (response) => this.log("llm_response", response),
           onFirstToken: () => this.mark("llm_first_token_ms"),
           onUsage: (usage) => {
             this.usage.input += usage.prompt_tokens;
@@ -309,6 +366,7 @@ export class CallSession extends DurableObject<Env> {
         // A half-finished turn can leave tool_calls without results, which the API rejects with HTTP 400.
         // Cart and order effects survive in OrderSession and reach the model through the state note.
         this.messages.length = historyLength;
+        this.log("turn_cancelled");
         return;
       }
       return this.failSafe(`llm: ${error instanceof Error ? error.message : String(error)}`);
@@ -350,18 +408,26 @@ export class CallSession extends DurableObject<Env> {
     }, Math.max(0, this.playingUntil - Date.now()) + SILENCE_MS);
   }
 
-  private say(text: string, language: Language = this.session.language): void {
+  private say(text: string, language: Language = this.session.language, recording?: string): void {
     if (this.ended) return;
     this.lastSpoken = text;
     this.session.noteSpoken(text);
     this.record("agent", text);
-    this.usage.ttsChars += text.length;
+    const said = this.log("say", { text, language });
     this.transport.sendEvent({ type: "assistant_text", text });
-    this.tts.speak(text, this.spokenRate, language);
     this.playingUntil = Math.max(this.playingUntil, Date.now());
+    if (recording && this.env.TTS_PROVIDER === "typecast") {
+      this.log("tts_start", { say: said, audio_ms: this.recorder.agentStartMs() });
+      this.onTtsAudio(new Int16Array(RECORDED[recording]!));
+      return;
+    }
+    this.unheard.push(said);
+    this.usage.ttsChars += text.length;
+    this.tts.speak(text, this.spokenRate, language);
   }
 
   private onTtsAudio(pcm: Int16Array): void {
+    this.recorder.addAgent(pcm, TTS_SAMPLE_RATE);
     this.transport.playAudio(pcm, TTS_SAMPLE_RATE);
     const seconds = pcm.length / TTS_SAMPLE_RATE;
     this.usage.ttsSeconds += seconds;
@@ -399,8 +465,23 @@ export class CallSession extends DurableObject<Env> {
     });
   }
 
-  private failSafe(reason: string): void {
+  // The screen already has the text of every reply, so the call carries on without sound.
+  private voiceOff(reason: string): void {
+    if (this.ended || this.voiceIsOff) return;
+    this.voiceIsOff = true;
+    console.error("tts off", this.callId, this.scrub(reason));
+    this.log("tts_off", { reason });
+    const broken = this.tts;
+    this.tts = new SilentTts();
+    this.unheard = [];
+    broken.cancel();
+    broken.close();
+    this.transport.sendEvent({ type: "voice_off" });
+  }
+
+  private failSafe(rawReason: string): void {
     if (this.ended) return;
+    const reason = this.scrub(rawReason);
     console.error("fail safe", this.callId, reason);
     this.emit("fail_safe", { reason });
     this.handoffReason = `fail_safe: ${reason}`;
@@ -442,6 +523,8 @@ export class CallSession extends DurableObject<Env> {
     this.turnAbort?.abort();
     this.stt?.close();
     this.tts.close();
+    // Anything still queued was never heard, since the line is closing.
+    this.recorder.stopAgent();
     const seconds = (Date.now() - this.startedAt) / 1000;
     const cost =
       seconds * PRICE.sttPerSecond +
@@ -452,6 +535,9 @@ export class CallSession extends DurableObject<Env> {
     this.transport.sendEvent({ type: "agent_event", name: "call_cost", cost_usd: cost });
     // The caller is released first, so a slow database never keeps the line open.
     this.transport.hangup();
+    if (this.current.speech_end_ms !== undefined) this.log("latency", { ...this.current });
+    this.log("usage", { ...this.usage, cost_usd: cost });
+    this.log("call_end", { outcome, seconds, handoff_reason: this.handoffReason });
     try {
       await this.calls.finish(this.callId, {
         outcome,
@@ -463,8 +549,44 @@ export class CallSession extends DurableObject<Env> {
     } catch (error) {
       console.error("call record failed", this.callId, error);
     }
+    await this.saveLogsAndAudio();
     // Transcripts live in Supabase under the 30-day retention job, so the DO keeps nothing.
     await this.ctx.storage.deleteAll();
+  }
+
+  // Logs first and in one insert, so a slow or failed upload cannot cost them.
+  private async saveLogsAndAudio(): Promise<void> {
+    const hasAudio = this.recorder.seconds > 0;
+    const path = `${this.callId}.wav`;
+    this.log("audio", hasAudio ? { path, seconds: this.recorder.seconds, rate: RECORD_RATE, left: "caller", right: "agent" } : { path: null });
+    const save = () => this.calls.saveLogs(JSON.parse(this.scrub(JSON.stringify(this.logs))));
+    try {
+      await save();
+    } catch (error) {
+      console.error("call logs failed", this.callId, error);
+    }
+    if (!hasAudio) return;
+    try {
+      const { error } = await createDb(this.env, UPLOAD_TIMEOUT_MS).storage.from(AUDIO_BUCKET).upload(path, this.recorder.toWav(), { contentType: "audio/wav" });
+      if (error) throw error;
+    } catch (error) {
+      console.error("call audio failed", this.callId, error);
+    }
+  }
+
+  // Provider errors can quote the credential they rejected.
+  private scrub(text: string): string {
+    const { META_API_KEY, TTS_API_KEY, SUPABASE_SERVICE_ROLE_KEY, SIM_ACCESS_CODE, PHONE_WEBHOOK_TOKEN } = this.env;
+    return [META_API_KEY, TTS_API_KEY, SUPABASE_SERVICE_ROLE_KEY, SIM_ACCESS_CODE, PHONE_WEBHOOK_TOKEN].reduce((clean, secret) => (secret ? clean.replaceAll(secret, "[redacted]") : clean), text);
+  }
+
+  // The end of a call always gets through, so a runaway call still shows how it finished.
+  private log(kind: string, payload: Record<string, unknown> = {}): number {
+    const seq = this.logs.length;
+    if (seq >= MAX_LOG_ROWS && !this.ended) return seq;
+    const now = Date.now();
+    this.logs.push({ call_sid: this.callId, seq, at: new Date(now).toISOString(), ms: now - this.startedAt, kind, payload: clip(payload) });
+    return seq;
   }
 
   private record(role: "caller" | "agent", text: string): void {
@@ -476,6 +598,7 @@ export class CallSession extends DurableObject<Env> {
   }
 
   private emit(name: string, data: Record<string, unknown> = {}): void {
+    this.log(name, data);
     this.transport.sendEvent({ type: "agent_event", name, ...data });
   }
 }

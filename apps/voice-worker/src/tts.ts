@@ -78,6 +78,10 @@ export class SonioxTts implements Tts {
   close(): void {
     this.closing = true;
     clearInterval(this.keepalive);
+    // Nothing more is coming, so anyone waiting for the queue to finish can stop.
+    this.activeStream = null;
+    this.queue = [];
+    this.drainWaiters.splice(0).forEach((resolve) => resolve());
     try {
       this.socket?.close(1000);
     } catch {

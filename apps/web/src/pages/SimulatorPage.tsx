@@ -60,6 +60,9 @@ const TOOL_LABEL: Record<string, Pair> = {
 
 const NONE: Pair = ["없음", "None"];
 const PHONE_NUMBER = "070-5276-7404";
+const PHONE_FLAG = "🇰🇷";
+// ponytail: English opens the simulator because a Korean number is an international call from abroad. Make both "phone" once a US number exists.
+const DEFAULT_MODE = { ko: "phone", en: "web" } as const;
 const BAD_CODE: Pair = ["접속 코드가 맞지 않습니다. 다시 입력해 주세요.", "That access code is not right. Please try again."];
 const NO_SERVER: Pair = ["서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.", "Could not reach the server. Please try again in a moment."];
 
@@ -93,9 +96,9 @@ function useElapsed(running: boolean): string {
 const ms = (value: number | undefined, t: T) => (value === undefined ? t(...NONE) : `${value.toLocaleString("ko-KR")}ms`);
 
 export function SimulatorPage() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [code, setCode] = useState(() => localStorage.getItem("sim-code") ?? "");
-  const [mode, setMode] = useState<"web" | "phone">("web");
+  const [mode, setMode] = useState<"web" | "phone">(() => DEFAULT_MODE[lang]);
   const [verified, setVerified] = useState(false);
   const [checking, setChecking] = useState(false);
   const [callers, setCallers] = useState<{ name: string; phone_e164: string }[]>([]);
@@ -207,6 +210,10 @@ export function SimulatorPage() {
         setStatus("in_call");
         setState(message.registered ? "GREETING" : "ONBOARD_NEW");
         setSilentMode(message.tts === "none");
+        break;
+      case "voice_off":
+        setSilentMode(true);
+        setTimeline((all) => [...all, { kind: "note", text: ["음성을 내보내지 못해 이 통화는 글자로만 이어 갑니다", "Voice is unavailable, so this call continues in text only"], at: Date.now() }]);
         break;
       case "clear":
         playback.current?.port.postMessage("clear");
@@ -373,8 +380,8 @@ export function SimulatorPage() {
             <CardDescription>{t("휴대폰으로 걸면 AI가 받아 주문을 도와드립니다. 한국어와 영어 모두 됩니다.", "An AI answers and takes your order, in Korean or English.")}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <a href={`tel:${PHONE_NUMBER.replaceAll("-", "")}`} className="text-3xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline">{PHONE_NUMBER}</a>
-            <p className="text-sm text-muted-foreground">{t("등록된 번호로 걸어야 주문할 수 있습니다. 다른 번호는 안내만 듣고 끊어집니다.", "Orders work from registered numbers only. Other numbers hear a short notice and the call ends.")}</p>
+            <a href={`tel:${PHONE_NUMBER.replaceAll("-", "")}`} aria-label={t(`한국 번호 ${PHONE_NUMBER}`, `Korean number ${PHONE_NUMBER}`)} className="text-3xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline"><span aria-hidden="true">{PHONE_FLAG} </span>{PHONE_NUMBER}</a>
+            <p className="text-sm text-muted-foreground">{t("누구나 전화해서 주문할 수 있습니다. 배달지는 시연용 주소로 들어갑니다.", "Anyone can call and order. Orders go to a demo address.")}</p>
           </CardContent>
         </Card>
       </div>
@@ -430,7 +437,7 @@ export function SimulatorPage() {
         </section>
 
         <section aria-label={t("통화 내용", "Transcript")} className="flex h-[min(72svh,720px)] min-h-[440px] flex-col rounded-xl border">
-          {silentMode && inCall && <Alert className="m-3 w-auto"><AlertDescription>{t("음성 안내가 아직 꺼져 있어 답변은 글자로만 나옵니다.", "Voice replies are still off, so answers appear as text only.")}</AlertDescription></Alert>}
+          {silentMode && inCall && <Alert className="m-3 w-auto"><AlertDescription>{t("음성 안내가 꺼져 있어 답변은 글자로만 나옵니다.", "Voice replies are off, so answers appear as text only.")}</AlertDescription></Alert>}
           {timeline.length === 0 && !partial ? (
             <Empty className="flex-1">
               <EmptyHeader>

@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +9,11 @@ import { Message, MessageContent } from "@/components/ui/message";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RequireLogin } from "../auth";
+import { Switch } from "@/components/ui/switch";
+import { Account, isAdmin, LoginForm, useSession } from "../auth";
 import { useT, type Pair, type T } from "../i18n";
-import { supabase } from "../supabase";
+import { publicDb, supabase } from "../supabase";
+import { CallLogs } from "./CallLogs";
 
 interface CallRow {
   call_sid: string;
@@ -18,7 +21,8 @@ interface CallRow {
   ended_at: string | null;
   outcome: string | null;
   cost_usd: number | null;
-  handoff_reason: string | null;
+  // Not readable without a login: it can quote raw provider errors.
+  handoff_reason?: string | null;
   transcript: { role: "caller" | "agent"; text: string }[] | null;
   latency_metrics: { tts_first_chunk_ms?: number }[] | null;
   customers: { name: string } | null;
@@ -77,22 +81,24 @@ function CallDetail({ call }: { call: CallRow }) {
   );
 }
 
-function Calls() {
+const PUBLIC_COLUMNS = "call_sid, started_at, ended_at, outcome, cost_usd, transcript, latency_metrics, customers(name)";
+
+function Calls({ db, developer }: { db: SupabaseClient; developer: boolean }) {
   const { t } = useT();
   const [calls, setCalls] = useState<CallRow[] | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    supabase
+    db
       .from("calls")
-      .select("call_sid, started_at, ended_at, outcome, cost_usd, handoff_reason, transcript, latency_metrics, customers(name)")
+      .select(developer ? `${PUBLIC_COLUMNS}, handoff_reason` : PUBLIC_COLUMNS)
       .order("started_at", { ascending: false })
       .limit(50)
       .then(({ data, error: failure }) => {
         if (failure) setError(failure.message);
         else setCalls(data as unknown as CallRow[]);
       });
-  }, []);
+  }, [db, developer]);
 
   if (error) return <Alert variant="destructive"><AlertDescription>{t("통화 기록을 불러오지 못했습니다. 새로고침해 주세요.", "Could not load call history. Please refresh the page.")}</AlertDescription></Alert>;
   if (!calls) return <Skeleton className="h-64 w-full" />;
@@ -121,9 +127,9 @@ function Calls() {
             <TableHead>{t("시작", "Started")}</TableHead>
             <TableHead>{t("고객", "Customer")}</TableHead>
             <TableHead>{t("결과", "Result")}</TableHead>
-            <TableHead className="text-right">{t("통화 길이", "Call length")}</TableHead>
-            <TableHead className="text-right">{t("첫 응답까지", "First reply")}</TableHead>
-            <TableHead className="text-right">{t("비용", "Cost")}</TableHead>
+            <TableHead className="text-right max-sm:hidden">{t("통화 길이", "Call length")}</TableHead>
+            <TableHead className="text-right max-md:hidden">{t("첫 응답까지", "First reply")}</TableHead>
+            <TableHead className="text-right max-md:hidden">{t("비용", "Cost")}</TableHead>
             <TableHead><span className="sr-only">{t("통화 내용", "Transcript")}</span></TableHead>
           </TableRow>
         </TableHeader>
@@ -133,17 +139,29 @@ function Calls() {
             const voice = firstVoice(call);
             return (
               <TableRow key={call.call_sid}>
-                <TableCell>{startedAt(call, t)}</TableCell>
-                <TableCell>{call.customers?.name ?? t("미등록 번호", "Unregistered number")}</TableCell>
-                <TableCell><Badge variant={outcome?.variant ?? "outline"}>{t(...(outcome?.label ?? IN_PROGRESS))}</Badge></TableCell>
-                <TableCell className="text-right tabular-nums">{duration(call, t)}</TableCell>
-                <TableCell className="text-right tabular-nums">{voice === null ? t("없음", "None") : t(`${(voice / 1000).toFixed(1)}초`, `${(voice / 1000).toFixed(1)} sec`)}</TableCell>
-                <TableCell className="text-right tabular-nums">{call.cost_usd === null ? t("없음", "None") : `$${Number(call.cost_usd).toFixed(4)}`}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="max-sm:whitespace-normal">{startedAt(call, t)}</TableCell>
+                <TableCell className="max-sm:whitespace-normal">{call.customers?.name ?? t("미등록 번호", "Unregistered number")}</TableCell>
+                <TableCell><Badge variant={outcome?.variant ?? "outline"} className="max-sm:h-auto max-sm:whitespace-normal">{t(...(outcome?.label ?? IN_PROGRESS))}</Badge></TableCell>
+                <TableCell className="text-right tabular-nums max-sm:hidden">{duration(call, t)}</TableCell>
+                <TableCell className="text-right tabular-nums max-md:hidden">{voice === null ? t("없음", "None") : t(`${(voice / 1000).toFixed(1)}초`, `${(voice / 1000).toFixed(1)} sec`)}</TableCell>
+                <TableCell className="text-right tabular-nums max-md:hidden">{call.cost_usd === null ? t("없음", "None") : `$${Number(call.cost_usd).toFixed(4)}`}</TableCell>
+                <TableCell className="text-right max-sm:flex max-sm:flex-col max-sm:items-end">
                   <Sheet>
-                    <SheetTrigger asChild><Button variant="ghost" size="sm">{t("통화 내용", "Transcript")}</Button></SheetTrigger>
+                    <SheetTrigger asChild><Button variant="ghost" size="sm" className="max-sm:px-1">{t("통화 내용", "Transcript")}</Button></SheetTrigger>
                     <CallDetail call={call} />
                   </Sheet>
+                  {developer && (
+                    <Sheet>
+                      <SheetTrigger asChild><Button variant="ghost" size="sm" className="max-sm:px-1">{t("로그", "Logs")}</Button></SheetTrigger>
+                      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+                        <SheetHeader>
+                          <SheetTitle>{t("통화 로그", "Call logs")}</SheetTitle>
+                          <SheetDescription>{startedAt(call, t)}, {duration(call, t)}, {t(...(outcome?.label ?? IN_PROGRESS))}</SheetDescription>
+                        </SheetHeader>
+                        <CallLogs callSid={call.call_sid} />
+                      </SheetContent>
+                    </Sheet>
+                  )}
                 </TableCell>
               </TableRow>
             );
@@ -156,9 +174,27 @@ function Calls() {
 
 export function AdminPage() {
   const { t } = useT();
+  const session = useSession();
+  const [wantsDeveloper, setWantsDeveloper] = useState(false);
+  const admin = isAdmin(session);
+  const developer = wantsDeveloper && admin;
+
   return (
-    <RequireLogin title={t("통화 기록", "Call history")} description={t("통화 내용과 비용을 보려면 관리자 계정으로 로그인하세요.", "Log in with an admin account to see call transcripts and costs.")}>
-      {() => <Calls />}
-    </RequireLogin>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">{t("통화 기록", "Call history")}</h1>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <div className="flex items-center gap-2">
+            <Switch id="developer-view" checked={wantsDeveloper} onCheckedChange={setWantsDeveloper} />
+            <label htmlFor="developer-view" className="text-sm font-medium">{t("개발자 보기", "Developer view")}</label>
+          </div>
+          {session && <Account session={session} />}
+        </div>
+      </div>
+      {wantsDeveloper && session === null && <LoginForm title={t("관리자 로그인", "Admin login")} description={t("녹음과 통화 로그를 보려면 관리자 계정으로 로그인하세요.", "Log in with an admin account to see recordings and call logs.")} />}
+      {wantsDeveloper && session && !admin && <Alert variant="destructive"><AlertDescription>{t("이 계정은 관리자가 아닙니다. 개발자 보기는 관리자 계정으로만 열 수 있습니다. 로그아웃한 뒤 관리자 계정으로 로그인해 주세요.", "This account is not an admin. Developer view only opens with an admin account. Log out, then log in with an admin account.")}</AlertDescription></Alert>}
+      {!developer && <p className="text-muted-foreground">{t("시연 통화만 공개됩니다. 실제 고객의 통화는 여기에 나오지 않습니다.", "Only demo calls are public. Real customers' calls never appear here.")}</p>}
+      <Calls key={developer ? "developer" : "public"} db={developer ? supabase : publicDb} developer={developer} />
+    </div>
   );
 }

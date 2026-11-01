@@ -1,5 +1,6 @@
 import { CustomerRepository } from "@callorder/adapters";
 import { createDb, type Env } from "./env";
+import { AUDIO_BUCKET, purgeOldAudio } from "./recording";
 
 export { CallSession } from "./call-session";
 
@@ -25,17 +26,26 @@ export function toE164(phone: string): string {
 }
 
 const xml = (body: string) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`, { headers: { "content-type": "application/xml" } });
-const NOT_REGISTERED = '<Say language="ko">등록된 번호로만 주문하실 수 있습니다.</Say><Say language="en">Orders are only available from registered numbers.</Say>';
+const CALLER_ID = /^\+\d{8,15}$/;
 
 async function answerPhone(request: Request, env: Env, url: URL): Promise<Response> {
   if (!env.PHONE_WEBHOOK_TOKEN || request.headers.get("x-callorder-token") !== env.PHONE_WEBHOOK_TOKEN) return new Response("forbidden", { status: 403 });
   const form = await request.formData();
   const caller = toE164(String(form.get("From") ?? ""));
-  // Stops strangers spending API credit on a public number before any model runs.
-  if (!(await new CustomerRepository(createDb(env)).findByPhone(caller))) return xml(NOT_REGISTERED);
+  // Anyone can order from any phone. A blocked caller id connects with no customer, which the call handles as unregistered.
+  const known = CALLER_ID.test(caller);
+  if (known) {
+    try {
+      await new CustomerRepository(createDb(env)).ensureCaller(caller);
+    } catch (error) {
+      console.error("caller registration failed", error);
+    }
+  }
   const callId = crypto.randomUUID();
   // ponytail: the caller id sits in the signed URL and so in access logs; hand it over through the DO if logs ever leave this account
-  const query = new URLSearchParams({ callId, caller, sig: await signStream(callId, caller, env.PHONE_WEBHOOK_TOKEN) });
+  const signedCaller = known ? caller : "";
+  const dialed = toE164(String(form.get("To") ?? ""));
+  const query = new URLSearchParams({ callId, caller: signedCaller, lang: dialed.startsWith("+1") ? "en" : "ko", sig: await signStream(callId, signedCaller, env.PHONE_WEBHOOK_TOKEN) });
   return xml(`<Connect><Stream url="wss://${url.host}/phone/stream?${query.toString().replaceAll("&", "&amp;")}"/></Connect>`);
 }
 
@@ -48,6 +58,10 @@ function corsHeaders(origin: string): HeadersInit {
 }
 
 export default {
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    console.log("purged call audio", await purgeOldAudio(createDb(env).storage.from(AUDIO_BUCKET)));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") return Response.json({ ok: true });

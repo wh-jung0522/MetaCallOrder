@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -5,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RequireLogin } from "../auth";
+import { Account, LoginForm, useSession } from "../auth";
 import { useT, type Pair } from "../i18n";
-import { isToday, itemLabel, timeAgo, useOrders, won, type OrderRow } from "../orders";
-import { supabase } from "../supabase";
+import { isToday, itemLabel, timeAgo, useLinkedIds, useOrders, won, type OrderRow } from "../orders";
+import { publicDb, supabase } from "../supabase";
 
 const COLUMNS: { title: Pair; statuses: OrderRow["status"][]; empty: Pair }[] = [
   { title: ["새 주문", "New orders"], statuses: ["pending"], empty: ["새 주문이 오면 여기에 바로 표시됩니다.", "New orders will show up here right away."] },
@@ -16,12 +17,12 @@ const COLUMNS: { title: Pair; statuses: OrderRow["status"][]; empty: Pair }[] = 
   { title: ["거절·취소", "Declined or cancelled"], statuses: ["rejected", "cancelled"], empty: ["거절하거나 취소된 주문이 없습니다.", "No declined or cancelled orders."] },
 ];
 
-function OrderCard({ order, isNew, onError, onChanged }: { order: OrderRow; isNew: boolean; onError: (failed: boolean) => void; onChanged: () => void }) {
+function OrderCard({ order, db, isNew, onError, onChanged }: { order: OrderRow; db: SupabaseClient; isNew: boolean; onError: (failed: boolean) => void; onChanged: () => void }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
   const decide = async (status: "accepted" | "rejected") => {
     setBusy(true);
-    const { error } = await supabase.from("orders").update({ status }).eq("id", order.id);
+    const { error } = await db.from("orders").update({ status }).eq("id", order.id);
     setBusy(false);
     onError(Boolean(error));
     onChanged();
@@ -53,9 +54,9 @@ function OrderCard({ order, isNew, onError, onChanged }: { order: OrderRow; isNe
   );
 }
 
-function Board() {
+function Board({ db }: { db: SupabaseClient }) {
   const { t } = useT();
-  const { orders, error, loading, live, newestId, reload } = useOrders();
+  const { orders, error, loading, live, newestId, reload } = useOrders(db);
   const [actionError, setActionError] = useState(false);
 
   if (error) return <Alert variant="destructive"><AlertDescription>{t("주문을 불러오지 못했습니다. 새로고침해 주세요.", "Could not load orders. Please refresh the page.")}</AlertDescription></Alert>;
@@ -78,7 +79,7 @@ function Board() {
             <section key={column.statuses[0]} aria-label={t(...column.title)} className="flex flex-col gap-3">
               <h2 className="flex items-center gap-2 font-bold">{t(...column.title)}<Badge variant={column.statuses[0] === "pending" && rows.length ? "default" : "secondary"}>{rows.length}</Badge></h2>
               {rows.length === 0 && <p className="py-6 text-sm text-muted-foreground">{t(...column.empty)}</p>}
-              {rows.map((order) => <OrderCard key={order.id} order={order} isNew={order.id === newestId} onError={setActionError} onChanged={reload} />)}
+              {rows.map((order) => <OrderCard key={order.id} order={order} db={db} isNew={order.id === newestId} onError={setActionError} onChanged={reload} />)}
             </section>
           );
         })}
@@ -89,9 +90,24 @@ function Board() {
 
 export function MerchantPage() {
   const { t } = useT();
+  const session = useSession();
+  const stores = useLinkedIds(session, "stores", "id", "owner_user_id");
+  const [wantsLogin, setWantsLogin] = useState(false);
+  const owner = Boolean(stores?.length);
+
   return (
-    <RequireLogin title={t("주문 받기", "Receive orders")} description={t("어르신이 전화로 넣은 주문을 받으려면 로그인하세요.", "Log in to receive orders that older adults place by phone.")}>
-      {() => <Board />}
-    </RequireLogin>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">{t("주문 받기", "Receive orders")}</h1>
+        {session ? <Account session={session} /> : session === null && <Button variant="outline" size="sm" onClick={() => setWantsLogin((open) => !open)}>{t("가게 로그인", "Store login")}</Button>}
+      </div>
+      {!session && wantsLogin && <LoginForm title={t("가게 로그인", "Store login")} description={t("실제 전화로 들어온 주문까지 보려면 로그인하세요.", "Log in to also see orders from real phone calls.")} />}
+      {stores === null ? <Skeleton className="h-64 w-full" /> : (
+        <>
+          {!owner && <p className="text-muted-foreground">{t("시연용 주문입니다. 누구나 수락하거나 거절해 볼 수 있습니다. 실제 전화로 들어온 주문은 가게 계정으로 로그인해야 보입니다.", "These are demo orders. Anyone can accept or decline them. Orders from real phone calls appear only after logging in with a store account.")}</p>}
+          <Board db={owner ? supabase : publicDb} />
+        </>
+      )}
+    </div>
   );
 }

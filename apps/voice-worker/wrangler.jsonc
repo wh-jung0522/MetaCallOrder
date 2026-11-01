@@ -5,6 +5,9 @@
   "compatibility_date": "2026-10-28",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "rules": [{ "type": "Data", "globs": ["**/*.pcm"], "fallthrough": false }],
+  // Deletes call audio past 30 days. Logs and transcripts go by pg_cron, at the same hour.
+  "triggers": { "crons": ["0 3 * * *"] },
   "durable_objects": {
     "bindings": [{ "name": "CALL_SESSION", "class_name": "CallSession" }]
   },
@@ -24,6 +27,7 @@
   "env": {
     "staging": {
       "name": "callorder-voice-staging",
+      "triggers": { "crons": ["0 3 * * *"] },
       "durable_objects": {
         "bindings": [{ "name": "CALL_SESSION", "class_name": "CallSession" }]
       },
