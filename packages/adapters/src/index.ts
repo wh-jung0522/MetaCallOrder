@@ -315,11 +315,11 @@ export class CustomerRepository {
   async sttKeywords(limit: number): Promise<string[]> {
     const [stores, menu] = await Promise.all([
       this.db.from("stores").select("name"),
-      this.db.from("menu_items").select("name, aliases"),
+      this.db.from("menu_items").select("name, aliases, options"),
     ]);
     const words = [
       ...(stores.data ?? []).map((row) => row.name as string),
-      ...(menu.data ?? []).flatMap((row) => [row.name as string, ...(row.aliases as string[])]),
+      ...(menu.data ?? []).flatMap((row) => [row.name as string, ...(row.aliases as string[]), ...(row.options as MenuOption[]).flatMap((option) => [...option.choices, ...(option.choices_en ?? [])])]),
     ];
     return [...new Set(words)].slice(0, limit);
   }

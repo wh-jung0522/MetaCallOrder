@@ -7,6 +7,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { useT } from "./i18n";
 import { supabase } from "./supabase";
 
 interface Props {
@@ -17,7 +18,8 @@ interface Props {
 
 export function RequireLogin({ title, description, children }: Props) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
-  const [error, setError] = useState("");
+  const { t } = useT();
+  const [error, setError] = useState(false);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export function RequireLogin({ title, description, children }: Props) {
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <span>{session.user.email}</span>
-            <Button variant="outline" size="sm" onClick={() => supabase.auth.signOut()}>로그아웃</Button>
+            <Button variant="outline" size="sm" onClick={() => supabase.auth.signOut()}>{t("로그아웃", "Log out")}</Button>
           </div>
         </div>
         {children(session)}
@@ -59,7 +61,7 @@ export function RequireLogin({ title, description, children }: Props) {
       password: String(form.get("password")),
     });
     setPending(false);
-    setError(failure ? "이메일이나 비밀번호가 맞지 않습니다. 다시 입력해 주세요." : "");
+    setError(Boolean(failure));
   };
 
   return (
@@ -73,17 +75,17 @@ export function RequireLogin({ title, description, children }: Props) {
           <form onSubmit={login}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="email">이메일</FieldLabel>
+                <FieldLabel htmlFor="email">{t("이메일", "Email")}</FieldLabel>
                 <Input id="email" name="email" type="email" required autoComplete="username" />
               </Field>
               <Field>
-                <FieldLabel htmlFor="password">비밀번호</FieldLabel>
+                <FieldLabel htmlFor="password">{t("비밀번호", "Password")}</FieldLabel>
                 <Input id="password" name="password" type="password" required autoComplete="current-password" />
               </Field>
-              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+              {error && <Alert variant="destructive"><AlertDescription>{t("이메일이나 비밀번호가 맞지 않습니다. 다시 입력해 주세요.", "That email or password is not right. Please try again.")}</AlertDescription></Alert>}
               <Button type="submit" disabled={pending}>
                 {pending && <Spinner data-icon="inline-start" />}
-                로그인
+                {t("로그인", "Log in")}
               </Button>
             </FieldGroup>
           </form>

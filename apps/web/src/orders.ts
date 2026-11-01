@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { T } from "./i18n";
 import { supabase } from "./supabase";
 
 export interface OrderRow {
@@ -7,7 +8,7 @@ export interface OrderRow {
   total: number;
   delivery_address: string;
   created_at: string;
-  items: { name: string; quantity: number; options: Record<string, string> }[];
+  items: { name: string; label_en?: string; quantity: number; options: Record<string, string> }[];
   stores: { name: string } | null;
   customers: { name: string } | null;
 }
@@ -50,18 +51,26 @@ export function useOrders() {
   return { orders, error, loading, live, newestId, reload: load };
 }
 
-export const won = (amount: number) => `${amount.toLocaleString("ko-KR")}원`;
-
-export function itemLabel(line: OrderRow["items"][number]): string {
-  return [...Object.values(line.options ?? {}), line.name].join(" ");
+export function won(amount: number, t: T): string {
+  const digits = amount.toLocaleString("ko-KR");
+  return t(`${digits}원`, `${digits} won`);
 }
 
-export function timeAgo(iso: string, now = Date.now()): string {
+// label_en already includes the options. Orders placed before it existed only have the Korean name.
+export function itemLabel(line: OrderRow["items"][number], t: T): string {
+  const korean = [...Object.values(line.options ?? {}), line.name].join(" ");
+  return t(korean, line.label_en || korean);
+}
+
+export function timeAgo(iso: string, t: T, now = Date.now()): string {
   const minutes = Math.floor((now - new Date(iso).getTime()) / 60000);
-  if (minutes < 1) return "방금 전";
-  if (minutes < 60) return `${minutes}분 전`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}시간 전`;
-  return `${Math.floor(minutes / 1440)}일 전`;
+  const ago = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  if (minutes < 1) return t("방금 전", "Just now");
+  if (minutes < 60) return t(`${minutes}분 전`, ago(minutes, "minute"));
+  const hours = Math.floor(minutes / 60);
+  if (minutes < 1440) return t(`${hours}시간 전`, ago(hours, "hour"));
+  const days = Math.floor(minutes / 1440);
+  return t(`${days}일 전`, ago(days, "day"));
 }
 
 export function isToday(iso: string): boolean {
