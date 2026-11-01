@@ -69,6 +69,17 @@ export interface AgentConfig {
   model: string;
 }
 
+// What the conversation agent can answer from directly, without a slower trip through the order agent.
+function catalogNote(ctx: OrderToolContext): string {
+  if (!ctx.catalog?.length) return "[판매 목록] 아직 불러오지 못했습니다. 메뉴 질문은 order_agent에게 맡깁니다.";
+  const english = ctx.session.language === "en";
+  const lines = ctx.catalog.map(({ store, menu }) => {
+    const names = menu.map((item) => (english ? (item.name_en ?? item.name) : item.name)).join(", ");
+    return `${english ? (store.name_en ?? store.name) : store.name} (${store.category ?? ""}): ${names}`;
+  });
+  return `[판매 목록]\n${lines.join("\n")}`;
+}
+
 function stateNote(ctx: OrderToolContext): string {
   return `[시스템 상태] ${JSON.stringify({
     customer: ctx.customer && { name: ctx.customer.name, default_address: ctx.customer.default_address, dietary_notes: ctx.customer.dietary_notes },
@@ -156,7 +167,7 @@ export async function runConversationTurn(
     const stream = await config.client.create(
       {
         model: config.model,
-        messages: [{ role: "system", content: CONVERSATION_PROMPT }, { role: "system", content: stateNote(ctx) }, ...messages],
+        messages: [{ role: "system", content: CONVERSATION_PROMPT }, { role: "system", content: catalogNote(ctx) }, { role: "system", content: stateNote(ctx) }, ...messages],
         tools: CONVERSATION_TOOLS,
         reasoning_effort: "minimal",
         stream: true,

@@ -57,6 +57,11 @@ export interface MenuItem {
   is_available: boolean;
 }
 
+export interface CatalogStore {
+  store: Store;
+  menu: MenuItem[];
+}
+
 export interface CartItem {
   menu_item_id: string;
   name: string;
@@ -174,6 +179,16 @@ export class SupabaseMerchantAdapter implements MerchantAdapter {
     const matched = nearby.filter((store) => close(store.name) || close(store.name_en) || close(store.category) || selling.has(store.id));
     // Nothing matched is not the same as nothing nearby: the agent can still offer what is open.
     return matched.length ? matched : nearby;
+  }
+
+  // Everything orderable near the caller, read once per call so questions about it need no further lookups.
+  async catalog(input: { lat: number; lng: number }): Promise<CatalogStore[]> {
+    const [stores, { data, error }] = await Promise.all([
+      this.searchStores(input),
+      this.db.from("menu_items").select("*").eq("is_available", true),
+    ]);
+    if (error) throw error;
+    return stores.map((store) => ({ store, menu: (data as MenuItem[]).filter((item) => item.store_id === store.id) }));
   }
 
   async getMenu(storeId: string): Promise<MenuItem[]> {

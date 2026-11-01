@@ -178,6 +178,11 @@ export class CallSession extends DurableObject<Env> {
       onOrderPlaced: (order, storeName) => this.onOrderPlaced(customers, order, storeName),
     };
 
+    const adapter = this.tools.adapter as SupabaseMerchantAdapter;
+    const { lat, lng } = this.customer ?? {};
+    // Without it the agent falls back to looking things up, so a failed read costs speed and not the call.
+    if (lat != null && lng != null) this.tools.catalog = await adapter.catalog({ lat, lng }).catch(() => undefined);
+
     this.log("call_start", { channel: transport.kind, language: this.session.language, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.sendEvent({ type: "start_ack", callId: this.callId, sampleRate: TTS_SAMPLE_RATE, tts: this.env.TTS_PROVIDER, registered: Boolean(this.customer) });
     transport.onHangup(() => void this.finish());

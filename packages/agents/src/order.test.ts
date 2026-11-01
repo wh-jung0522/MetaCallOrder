@@ -279,3 +279,33 @@ describe("english calls", () => {
     expect(recap).not.toMatch(/[가-힣]/);
   });
 });
+
+describe("catalog", () => {
+  const store = (id: string, name: string, category: string) => ({ id, name, category }) as Store;
+  const menuItem = (id: string, storeId: string, name: string): MenuItem => ({ id, store_id: storeId, name, aliases: [], price: 8000, options: [], is_available: true });
+  const catalog = [
+    { store: store("s1", "만리장성", "중식"), menu: [menuItem("m1", "s1", "짬뽕")] },
+    { store: store("s2", "붉은대문 반점", "중식"), menu: [menuItem("m2", "s2", "굴짬뽕")] },
+    { store: store("s3", "구름다방", "카페"), menu: [menuItem("m3", "s3", "아메리카노")] },
+  ];
+
+  it("finds a dish across every store so the caller can be asked where", async () => {
+    const { ctx } = fixture();
+    ctx.catalog = catalog;
+    const found = (await executeOrderTool("find_menu", { query: "짬뽕" }, ctx)) as { store_id: string }[];
+    expect(found.map((row) => row.store_id)).toEqual(["s1", "s2"]);
+    expect(await executeOrderTool("find_menu", { query: "초밥" }, ctx)).toEqual([]);
+  });
+
+  it("gives the conversation agent the list so it can answer directly", async () => {
+    const { ctx } = fixture();
+    ctx.catalog = catalog;
+    const requests: { messages: { content: string }[] }[] = [];
+    const client = { create: async (request: never) => {
+      requests.push(request);
+      return (async function* () { yield { choices: [{ delta: { content: "중식과 카페가 있습니다." } }] }; })();
+    } } as unknown as ChatClient;
+    await runConversationTurn([], ctx, { client, model: "m" }, { speak() {}, onToolCall() {}, onFirstToken() {}, onUsage() {} }, new AbortController().signal);
+    expect(requests[0]!.messages[1]!.content).toContain("구름다방 (카페): 아메리카노");
+  });
+});

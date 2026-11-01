@@ -1,4 +1,4 @@
-import type { CustomerRepository, Customer, MerchantAdapter, OrderResult } from "@callorder/adapters";
+import type { CatalogStore, CustomerRepository, Customer, MerchantAdapter, OrderResult } from "@callorder/adapters";
 import { rankMenu } from "@callorder/adapters";
 import type OpenAI from "openai";
 import { buildRecap, OrderSession } from "./order-session";
@@ -9,6 +9,7 @@ export interface OrderToolContext {
   customer: Customer | null;
   session: OrderSession;
   adapter: MerchantAdapter;
+  catalog?: CatalogStore[];
   customers: CustomerRepository;
   pendingRecap: string | null;
   storeName: string | null;
@@ -29,6 +30,7 @@ const integer = { type: "integer" };
 export const ORDER_TOOLS: OpenAI.ChatCompletionTool[] = [
   tool("identify_customer", "발신번호로 등록된 고객과 기본 주소를 조회합니다."),
   tool("get_recent_orders", "이 고객의 최근 주문을 조회합니다.", { limit: integer }),
+  tool("find_menu", "모든 가게에서 메뉴를 찾아 가게별로 돌려줍니다. 가게가 정해지지 않았을 때 먼저 씁니다.", { query: string }, ["query"]),
   tool("search_stores", "고객 주소 근처에서 영업 중인 가게를 찾습니다.", { query: string }),
   tool("search_menu", "가게 메뉴를 구어 표현까지 포함해 찾습니다.", { store_id: string, query: string }, ["store_id", "query"]),
   tool("cart_add", "장바구니에 메뉴를 담습니다. options는 옵션명과 선택값의 객체입니다.",
@@ -59,6 +61,14 @@ export async function executeOrderTool(name: string, args: Record<string, any>, 
       };
     case "get_recent_orders":
       return ctx.customers.recentOrders(requireCustomer(ctx).id, Math.min(args.limit ?? 3, 10));
+    case "find_menu": {
+      const catalog = ctx.catalog ?? [];
+      return catalog.flatMap(({ store, menu }) =>
+        rankMenu(menu, args.query).slice(0, 3).map(({ id, name, name_en, price, options }) => ({
+          store_id: store.id, store_name: store.name, store_name_en: store.name_en, menu_item_id: id, name, name_en, price, options,
+        })),
+      );
+    }
     case "search_stores": {
       const customer = requireCustomer(ctx);
       if (customer.lat == null || customer.lng == null) throw new Error("고객 주소의 좌표가 없습니다");
