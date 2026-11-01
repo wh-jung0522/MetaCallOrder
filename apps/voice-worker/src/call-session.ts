@@ -1,7 +1,5 @@
 import enGreeting from "./greetings/en-greeting.pcm";
-import enOther from "./greetings/en-other.pcm";
 import koGreeting from "./greetings/ko-greeting.pcm";
-import koOther from "./greetings/ko-other.pcm";
 import { CallRepository, CustomerRepository, FIRST_TIME_CALLER_NAME, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
 import { isBargeIn, isHandoffRequest, isRepeatRequest, nextLanguage, OrderSession, runConversationTurn, type Language, type OrderToolContext, type TurnAction } from "@callorder/agents";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -15,13 +13,12 @@ import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, TypecastTts, type Tts } from "./
 
 // Recorded by eval/make-greetings.mjs in the TTS_VOICE voice, so the call opens instantly.
 const RECORDED: Record<string, ArrayBuffer> = {
-  "ko-greeting": koGreeting, "ko-other": koOther, "en-greeting": enGreeting, "en-other": enOther,
+  "ko-greeting": koGreeting, "en-greeting": enGreeting,
 };
 
-const PHRASES: Record<Language, { greeting: string; otherLanguage: string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
+const PHRASES: Record<Language, { greeting: string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
     greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
-    otherLanguage: "한국어로 말씀하셔도 됩니다.",
     whatToOrder: "무엇을 주문해 드릴까요?",
     reorder: (item) => `지난번에 ${item} 드셨어요. 같은 걸로 하실까요?`,
     silence: "천천히 말씀하셔도 됩니다.",
@@ -32,7 +29,6 @@ const PHRASES: Record<Language, { greeting: string; otherLanguage: string; whatT
   },
   en: {
     greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
-    otherLanguage: "You can also speak English.",
     whatToOrder: "What would you like to order?",
     reorder: (item) => `Last time you had ${item}. Would you like the same?`,
     silence: "Please take your time.",
@@ -267,10 +263,11 @@ export class CallSession extends DurableObject<Env> {
   }
 
   private greet(): void {
+    // The whole notice in both languages; only the order changes.
     const language = this.session.language;
     const other = language === "ko" ? "en" : "ko";
     this.say(PHRASES[language].greeting, language, `${language}-greeting`);
-    this.say(PHRASES[other].otherLanguage, other, `${other}-other`);
+    this.say(PHRASES[other].greeting, other, `${other}-greeting`);
   }
 
   private onPartial(text: string): void {

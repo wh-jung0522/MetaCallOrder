@@ -2,10 +2,11 @@ export type Language = "ko" | "en";
 
 const compact = (text: string) => text.toLowerCase().replace(/[\s.,!?~…'’]/g, "");
 
-// One stray English word ("오케이" heard as "okay") must not flip a Korean call; any Hangul flips back at once.
+// The call follows whichever language the caller speaks. Words Koreans also say ("오케이" heard as "okay") do not flip it.
 export function nextLanguage(text: string, current: Language): Language {
   if (/[가-힣]/.test(text)) return "ko";
-  return (text.match(/[a-z]+/gi)?.length ?? 0) >= 2 ? "en" : current;
+  const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
+  return words.some((word) => !/^(ok|okay|yes|no)$/.test(word)) ? "en" : current;
 }
 
 const AFFIRMATIVE = /^(네|예|응|그래|맞아|맞아요|맞습니다|맞네|맞다|그래요|그럼요|좋아|좋아요|부탁해요|주문해|주문해요|주문해줘|주문해주세요|보내줘|보내주세요|해줘|해주세요|그렇게해주세요|그렇게해줘|yes|yeah|yep|yup|correct|right|sure|ok|okay|please|goahead|thatsright|thatscorrect|soundsgood|confirm|placeit|placetheorder|sendit)+$/;

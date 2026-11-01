@@ -265,6 +265,8 @@ describe("english calls", () => {
   it("follows the caller's language without flipping on one stray word", () => {
     expect(nextLanguage("okay", "ko")).toBe("ko");
     expect(nextLanguage("two soups please", "ko")).toBe("en");
+    expect(nextLanguage("hello", "ko")).toBe("en");
+    expect(nextLanguage("yes", "ko")).toBe("ko");
     expect(nextLanguage("네", "en")).toBe("ko");
     expect(nextLanguage("yes", "en")).toBe("en");
   });

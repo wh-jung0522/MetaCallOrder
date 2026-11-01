@@ -8,9 +8,7 @@ const MODEL = "ssfm-v31";
 const OUT = new URL("../apps/voice-worker/src/greetings/", import.meta.url);
 const CLIPS = {
   "ko-greeting": ["kor", "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다."],
-  "ko-other": ["kor", "한국어로 말씀하셔도 됩니다."],
   "en-greeting": ["eng", "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it."],
-  "en-other": ["eng", "You can also speak English."],
 };
 
 for (const [name, [language, text]] of Object.entries(CLIPS)) {
