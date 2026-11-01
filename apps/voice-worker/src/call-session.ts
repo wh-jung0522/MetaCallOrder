@@ -150,6 +150,9 @@ export class CallSession extends DurableObject<Env> {
     this.transport = transport;
     this.startedAt = Date.now();
     this.recorder = new CallRecorder(this.startedAt);
+    this.session.language = this.dialedLanguage ?? (!callerId || callerId.startsWith("+82") ? "ko" : "en");
+    // A stored greeting needs nothing below, so the caller is not left in silence while the call is set up.
+    if (this.env.TTS_PROVIDER === "typecast") this.greet();
 
     this.db = createDb(this.env);
     this.calls = new CallRepository(this.db);
@@ -165,7 +168,6 @@ export class CallSession extends DurableObject<Env> {
     }
     this.customer = transport.kind === "phone" || found?.is_demo ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
-    this.session.language = this.dialedLanguage ?? (!callerId || callerId.startsWith("+82") ? "ko" : "en");
 
     this.tools = {
       callSid: this.callId,
@@ -248,9 +250,7 @@ export class CallSession extends DurableObject<Env> {
     });
 
     const language = this.session.language;
-    const other = language === "ko" ? "en" : "ko";
-    this.say(PHRASES[language].greeting, language, `${language}-greeting`);
-    this.say(PHRASES[other].otherLanguage, other, `${other}-other`);
+    if (this.env.TTS_PROVIDER !== "typecast") this.greet();
     if (!this.customer) {
       this.messages.push({ role: "user", content: "[시스템 상태] 전화가 연결됐습니다. 발신번호를 알 수 없습니다." });
       this.enqueueTurn();
@@ -264,6 +264,13 @@ export class CallSession extends DurableObject<Env> {
     this.messages.push({ role: "assistant", content: opening });
     this.say(opening);
     this.armSilenceTimer();
+  }
+
+  private greet(): void {
+    const language = this.session.language;
+    const other = language === "ko" ? "en" : "ko";
+    this.say(PHRASES[language].greeting, language, `${language}-greeting`);
+    this.say(PHRASES[other].otherLanguage, other, `${other}-other`);
   }
 
   private onPartial(text: string): void {
