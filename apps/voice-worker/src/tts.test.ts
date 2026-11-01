@@ -32,6 +32,19 @@ describe("TypecastTts", () => {
     vi.unstubAllGlobals();
   });
 
+  it("retries a momentary refusal instead of failing the call", async () => {
+    const replies = [new Response("unusual", { status: 403 }), streamOf([new Uint8Array(44 + 8)])];
+    vi.stubGlobal("fetch", vi.fn(async () => replies.shift()));
+    const failures: string[] = [];
+    const audio: Int16Array[] = [];
+    const tts = new TypecastTts({ onAudio: (chunk) => void audio.push(chunk), onFirstChunk() {}, onFailure: (reason) => void failures.push(reason) }, options);
+    tts.speak("하나", 1, "ko");
+    await tts.drained();
+    expect(failures).toEqual([]);
+    expect(audio).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   it("reports an API error, but stays quiet when cancelled", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("Insufficient credit", { status: 402 })));
     const failures: string[] = [];
