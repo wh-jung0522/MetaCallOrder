@@ -78,7 +78,7 @@ function Board({ db }: { db: SupabaseClient }) {
           return (
             <section key={column.statuses[0]} aria-label={t(...column.title)} className="flex flex-col gap-3">
               <h2 className="flex items-center gap-2 font-bold">{t(...column.title)}<Badge variant={column.statuses[0] === "pending" && rows.length ? "default" : "secondary"}>{rows.length}</Badge></h2>
-              {rows.length === 0 && <p className="py-6 text-sm text-muted-foreground">{t(...column.empty)}</p>}
+              {rows.length === 0 && <p className="py-1 text-sm text-muted-foreground">{t(...column.empty)}</p>}
               {rows.map((order) => <OrderCard key={order.id} order={order} db={db} isNew={order.id === newestId} onError={setActionError} onChanged={reload} />)}
             </section>
           );
@@ -104,7 +104,7 @@ export function MerchantPage() {
       {!session && wantsLogin && <LoginForm title={t("가게 로그인", "Store login")} description={t("실제 전화로 들어온 주문까지 보려면 로그인하세요.", "Log in to also see orders from real phone calls.")} />}
       {stores === null ? <Skeleton className="h-64 w-full" /> : (
         <>
-          {!owner && <p className="text-muted-foreground">{t("시연용 주문입니다. 누구나 수락하거나 거절해 볼 수 있습니다. 실제 전화로 들어온 주문은 가게 계정으로 로그인해야 보입니다.", "These are demo orders. Anyone can accept or decline them. Orders from real phone calls appear only after logging in with a store account.")}</p>}
+          {!owner && <p className="text-muted-foreground">{t("시연용 주문과 전화로 들어온 주문이 함께 보입니다. 누구나 수락하거나 거절해 볼 수 있습니다.", "Demo orders and orders from phone calls both appear here. Anyone can accept or decline them.")}</p>}
           <Board db={owner ? supabase : publicDb} />
         </>
       )}

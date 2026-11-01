@@ -53,7 +53,7 @@ function duration(call: CallRow, t: T): string {
   return t(`${Math.floor(seconds / 60)}분 ${seconds % 60}초`, `${Math.floor(seconds / 60)} min ${seconds % 60} sec`);
 }
 
-const startedAt = (call: CallRow, t: T) => new Date(call.started_at).toLocaleString(t("ko-KR", "en-US"), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const startedAt = (call: CallRow, t: T) => new Date(call.started_at).toLocaleString(t("ko-KR", "en-US"), { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function CallDetail({ call }: { call: CallRow }) {
   const { t } = useT();
@@ -61,7 +61,7 @@ function CallDetail({ call }: { call: CallRow }) {
   return (
     <SheetContent className="sm:max-w-lg">
       <SheetHeader>
-        <SheetTitle>{t(`${call.customers?.name ?? "미등록 번호"} 통화`, call.customers ? `Call with ${call.customers.name}` : "Call from an unregistered number")}</SheetTitle>
+        <SheetTitle>{t(`${call.customers?.name ?? "번호 없는 전화"} 통화`, call.customers ? `Call with ${call.customers.name}` : "Call with no number")}</SheetTitle>
         <SheetDescription>{startedAt(call, t)}, {duration(call, t)}, {t(...(outcome?.label ?? IN_PROGRESS))}</SheetDescription>
       </SheetHeader>
       <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-6">
@@ -140,7 +140,7 @@ function Calls({ db, developer }: { db: SupabaseClient; developer: boolean }) {
             return (
               <TableRow key={call.call_sid}>
                 <TableCell className="max-sm:whitespace-normal">{startedAt(call, t)}</TableCell>
-                <TableCell className="max-sm:whitespace-normal">{call.customers?.name ?? t("미등록 번호", "Unregistered number")}</TableCell>
+                <TableCell className="max-sm:whitespace-normal">{call.customers?.name ?? t("번호 없음", "No number")}</TableCell>
                 <TableCell><Badge variant={outcome?.variant ?? "outline"} className="max-sm:h-auto max-sm:whitespace-normal">{t(...(outcome?.label ?? IN_PROGRESS))}</Badge></TableCell>
                 <TableCell className="text-right tabular-nums max-sm:hidden">{duration(call, t)}</TableCell>
                 <TableCell className="text-right tabular-nums max-md:hidden">{voice === null ? t("없음", "None") : t(`${(voice / 1000).toFixed(1)}초`, `${(voice / 1000).toFixed(1)} sec`)}</TableCell>
@@ -178,6 +178,12 @@ export function AdminPage() {
   const [wantsDeveloper, setWantsDeveloper] = useState(false);
   const admin = isAdmin(session);
   const developer = wantsDeveloper && admin;
+
+  // The role lives in the login token, so a role granted after login only shows up on a fresh one.
+  const userId = session?.user.id;
+  useEffect(() => {
+    if (wantsDeveloper && userId && !admin) void supabase.auth.refreshSession();
+  }, [wantsDeveloper, userId, admin]);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">

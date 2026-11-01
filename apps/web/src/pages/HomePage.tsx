@@ -12,7 +12,7 @@ const EXAMPLE: { who: "caller" | "agent"; text: Pair }[] = [
 ];
 
 const STEPS: { title: Pair; body: Pair }[] = [
-  { title: ["늘 쓰던 전화로 겁니다", "Call from your usual phone"], body: ["앱을 깔거나 가입하지 않아도 됩니다. 등록된 번호면 누구신지 먼저 알아봅니다.", "There is no app to install and no sign-up. If your number is registered, we know who you are right away."] },
+  { title: ["늘 쓰던 전화로 겁니다", "Call from your usual phone"], body: ["앱을 깔거나 가입하지 않아도 됩니다. 처음 거는 번호도 바로 주문할 수 있습니다.", "There is no app to install and no sign-up. A first-time number can order right away."] },
   { title: ["평소 말투로 주문합니다", "Order the way you normally talk"], body: ["\"저번에 시킨 국밥\"이라고 해도 지난 주문과 메뉴에서 찾아 되묻습니다.", "Even if you say \"the gukbap I got last time\", we look through your past orders and the menu, then check with you."] },
   { title: ["\"네\"라고 해야 주문됩니다", "Nothing is ordered until you say \"yes\""], body: ["가게, 메뉴, 금액, 주소를 천천히 읽어 드리고, 직접 확인한 뒤에만 주문이 들어갑니다.", "We slowly read back the store, items, price, and address. The order goes in only after you confirm."] },
 ];

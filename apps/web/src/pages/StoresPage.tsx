@@ -273,7 +273,7 @@ export function StoresPage() {
         {selected && <StoreDetail store={selected} menu={menu.filter((item) => item.store_id === selected.id)} onBack={back} t={t} pick={pick} />}
 
         <div hidden={Boolean(selected)}>
-          <div className="flex flex-col gap-3 p-4 md:p-5">
+          <div className="flex flex-col gap-3 p-4 md:p-6">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4">
               <h1 className="text-2xl font-extrabold tracking-tight">{t("우리 동네 가게", "Stores near you")}</h1>
               <a href="/merchant" className="rounded-sm text-sm text-primary underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">{t("사장님 주문 받기", "Store owner orders")}</a>
@@ -282,7 +282,7 @@ export function StoresPage() {
               <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="pl-8" aria-label={t("가게나 메뉴 검색", "Search stores or menus")} placeholder={t("가게나 메뉴 이름으로 찾기", "Search by store or menu")} />
             </div>
-            <div role="group" aria-label={t("가게 종류", "Store type")} className="-mx-4 flex gap-1.5 overflow-x-auto px-4 py-1 md:mx-0 md:flex-wrap md:px-0">
+            <div role="group" aria-label={t("가게 종류", "Store type")} className="flex flex-wrap gap-1.5 py-1">
               <Button size="sm" className="rounded-full" variant={category === null ? "default" : "outline"} aria-pressed={category === null} onClick={() => setCategory(null)}>{t("전체", "All")}</Button>
               {categories.map(([ko, en]) => (
                 <Button key={ko} size="sm" className="rounded-full" variant={category === ko ? "default" : "outline"} aria-pressed={category === ko} onClick={() => setCategory(category === ko ? null : ko)}>{t(ko, en)}</Button>

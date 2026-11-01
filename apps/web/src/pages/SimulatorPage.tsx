@@ -394,7 +394,7 @@ export function SimulatorPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
       {modeSwitch}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <Field className="w-72">

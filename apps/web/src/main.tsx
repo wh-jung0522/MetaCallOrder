@@ -35,8 +35,10 @@ function App() {
   const { t, lang, setLang } = useT();
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="flex flex-wrap items-center gap-x-6 border-b px-4 md:h-14 md:px-6">
-        <a href="/" className="flex items-center text-lg max-md:h-14 font-extrabold tracking-tight text-primary">{t("콜오더", "CallOrder")}</a>
+      <header className="border-b">
+        {/* The header lines up with the page below it; the store map runs edge to edge. */}
+        <div className={`mx-auto flex w-full flex-wrap items-center gap-x-6 px-4 md:h-14 md:px-6 ${location.pathname === "/stores" ? "" : "max-w-6xl"}`}>
+        <a href="/" className="flex items-center text-lg font-extrabold max-md:h-14 tracking-tight text-primary">{t("콜오더", "CallOrder")}</a>
         <nav aria-label={t("주요 화면", "Main screens")} className="flex gap-1 overflow-x-auto max-md:order-last max-md:w-full max-md:pb-2">
           {LINKS.map(({ path, label }) => (
             <Button key={path} asChild size="sm" variant={activePath === path ? "secondary" : "ghost"}>
@@ -48,6 +50,7 @@ function App() {
           <Button size="sm" lang="ko" variant={lang === "ko" ? "secondary" : "ghost"} aria-pressed={lang === "ko"} onClick={() => setLang("ko")}>한국어</Button>
           <span aria-hidden="true">/</span>
           <Button size="sm" lang="en" variant={lang === "en" ? "secondary" : "ghost"} aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</Button>
+        </div>
         </div>
       </header>
       <main className="flex flex-1 flex-col"><Suspense><Page /></Suspense></main>

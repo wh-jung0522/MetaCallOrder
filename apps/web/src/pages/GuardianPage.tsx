@@ -78,7 +78,7 @@ function Orders({ db, customerIds }: { db: SupabaseClient; customerIds?: string[
     );
   }
   return (
-    <div className="max-w-2xl">
+    <div>
       {customerIds && <p className="text-muted-foreground">{t(`${orders[0]?.customers?.name ?? ""}님의 최근 주문입니다. 잘못된 주문은 여기서 취소할 수 있습니다.`, `Recent orders for ${orders[0]?.customers?.name ?? ""}. You can cancel a wrong order here.`)}</p>}
       <Separator className="mt-4" />
       <ol className="flex flex-col divide-y">{orders.map((order) => <OrderItem key={order.id} order={order} db={db} showCustomer={!customerIds} onChanged={reload} />)}</ol>

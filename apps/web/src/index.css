@@ -127,6 +127,17 @@
   html {
     @apply font-sans;
     }
+  /* Korean breaks between words, not inside them. A word too long for its box still wraps. */
+  html:lang(ko) {
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    }
+  h1, h2, h3 {
+    text-wrap: balance;
+    }
+  p {
+    text-wrap: pretty;
+    }
 }
 
 body {
