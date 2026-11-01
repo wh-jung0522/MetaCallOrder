@@ -12,11 +12,11 @@ export interface OrderRow {
   created_at: string;
   items: { name: string; label_en?: string; quantity: number; options: Record<string, string> }[];
   stores: { name: string } | null;
-  customers: { name: string } | null;
+  customers: { name: string; phone_last4: string | null } | null;
 }
 
 const REFRESH_MS = 30_000;
-const SELECT = "id, customer_id, status, total, delivery_address, created_at, items, stores(name), customers(name)";
+const SELECT = "id, customer_id, status, total, delivery_address, created_at, items, stores(name), customers(name, phone_last4)";
 
 // RLS scopes both the query and the Realtime feed to what this client may see.
 export function useOrders(db: SupabaseClient = supabase, customerIds?: string[]) {
@@ -92,4 +92,10 @@ export function timeAgo(iso: string, t: T, now = Date.now()): string {
 
 export function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString();
+}
+
+// Phone callers have no name, so the last four digits of their number tell them apart.
+export function customerLabel(customer: OrderRow["customers"], t: T): string {
+  if (!customer) return "";
+  return customer.name === "고객" && customer.phone_last4 ? t(`고객 ${customer.phone_last4}`, `Caller ${customer.phone_last4}`) : customer.name;
 }

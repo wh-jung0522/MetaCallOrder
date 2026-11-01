@@ -277,9 +277,9 @@ export class CustomerRepository {
   }
 
   // Keeps an existing row as it is, so a repeat caller's name and address are never reset.
-  async ensureCaller(phone: string): Promise<void> {
+  async ensureCaller(phone: string, isDemo = false): Promise<void> {
     const { error } = await this.db.from("customers").upsert(
-      { phone_e164: phone, name: FIRST_TIME_CALLER_NAME, default_address: "행복동 12번지", lat: 37.5665, lng: 126.978, preferred_speech_rate: 0.95, is_demo: false },
+      { phone_e164: phone, name: FIRST_TIME_CALLER_NAME, default_address: "행복동 12번지", lat: 37.5665, lng: 126.978, preferred_speech_rate: 0.95, is_demo: isDemo, auto_created: true },
       { onConflict: "phone_e164", ignoreDuplicates: true },
     );
     if (error) throw error;

@@ -147,7 +147,7 @@ describe("place_order confirmation gate", () => {
   it("refuses unregistered callers", async () => {
     const { ctx } = fixture({ customer: null });
     await addTwo(ctx);
-    await expect(executeOrderTool("request_confirmation", {}, ctx)).rejects.toThrow("미등록");
+    await expect(executeOrderTool("request_confirmation", {}, ctx)).rejects.toThrow("발신번호");
   });
 
   it("requires mandatory options", async () => {

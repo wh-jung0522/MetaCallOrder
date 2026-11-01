@@ -242,7 +242,7 @@ try {
     else events.push(JSON.parse(data.toString()));
   });
   await new Promise((resolve, reject) => { client.on("open", resolve); client.on("error", reject); });
-  client.send(JSON.stringify({ type: "start", callerId: customer.phone_e164, phoneQuality: true }));
+  client.send(JSON.stringify({ type: "start", callerId: customer.phone_e164, phoneQuality: true, lang: "ko" }));
 
   await until(() => events.some((e) => e.type === "start_ack"), "start_ack");
   await until(() => said("무엇을 주문해 드릴까요"), "greeting");
@@ -334,7 +334,7 @@ try {
   const second = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}/sim/stream?callId=e2e-call-0002&code=code`, { headers: { origin: ORIGIN } });
   second.on("message", (data, isBinary) => { if (!isBinary) silent.push(JSON.parse(data.toString())); });
   await new Promise((resolve, reject) => { second.on("open", resolve); second.on("error", reject); });
-  second.send(JSON.stringify({ type: "start", callerId: customer.phone_e164 }));
+  second.send(JSON.stringify({ type: "start", callerId: customer.phone_e164, lang: "ko" }));
   await until(() => silent.some((e) => e.type === "voice_off"), "voice off event");
   await until(() => stt, "second stt");
   await sleep(300);

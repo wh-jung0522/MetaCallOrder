@@ -299,7 +299,7 @@ export function SimulatorPage() {
       const ws = new WebSocket(`${WS_URL}?callId=${callId}&code=${encodeURIComponent(code)}`);
       ws.binaryType = "arraybuffer";
       socket.current = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ type: "start", callerId, phoneQuality }));
+      ws.onopen = () => ws.send(JSON.stringify({ type: "start", callerId, phoneQuality, lang }));
       ws.onmessage = ({ data }) => onServerMessage(data);
       ws.onerror = () => setError(["서버에 연결하지 못했습니다. 잠시 뒤 다시 걸어 주세요.", "Could not reach the server. Please call again in a moment."]);
       ws.onclose = () => {
@@ -403,8 +403,8 @@ export function SimulatorPage() {
             <SelectTrigger id="caller" className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {callers.map((caller) => <SelectItem key={caller.phone_e164} value={caller.phone_e164}>{caller.name} ({formatPhone(caller.phone_e164)})</SelectItem>)}
-                <SelectItem value={UNREGISTERED}>{t("등록 안 된 번호", "Unregistered number")} ({formatPhone(UNREGISTERED)})</SelectItem>
+                {callers.filter((caller) => caller.phone_e164 !== UNREGISTERED).map((caller) => <SelectItem key={caller.phone_e164} value={caller.phone_e164}>{caller.name} ({formatPhone(caller.phone_e164)})</SelectItem>)}
+                <SelectItem value={UNREGISTERED}>{t("처음 거는 번호", "First-time number")} ({formatPhone(UNREGISTERED)})</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -424,7 +424,7 @@ export function SimulatorPage() {
               <div className="flex justify-between text-sm font-bold"><span>{t(...STATUS_TEXT[status])}</span><span>{status === "in_call" ? elapsed : "--:--"}</span></div>
               <div className="text-xl font-extrabold leading-relaxed whitespace-nowrap">{formatPhone(callerId)}</div>
               <div className="flex items-center justify-between text-sm font-bold">
-                <span>{callerName ?? t("미등록", "Unregistered")}</span>
+                <span>{callerName ?? t("처음 거는 번호", "First-time number")}</span>
                 <div className="meter" ref={meter} aria-hidden="true"><i /><i /><i /><i /><i /></div>
               </div>
             </div>

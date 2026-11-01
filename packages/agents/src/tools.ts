@@ -42,7 +42,7 @@ export const ORDER_TOOLS: OpenAI.ChatCompletionTool[] = [
 ];
 
 function requireCustomer(ctx: OrderToolContext): Customer {
-  if (!ctx.customer) throw new Error("미등록 번호는 주문할 수 없습니다");
+  if (!ctx.customer) throw new Error("발신번호를 알 수 없어 주문할 수 없습니다");
   return ctx.customer;
 }
 

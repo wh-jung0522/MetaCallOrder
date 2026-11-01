@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Account, LoginForm, useSession } from "../auth";
 import { useT, type Pair } from "../i18n";
-import { itemLabel, timeAgo, useLinkedIds, useOrders, won, type OrderRow } from "../orders";
+import { customerLabel, itemLabel, timeAgo, useLinkedIds, useOrders, won, type OrderRow } from "../orders";
 import { publicDb, supabase } from "../supabase";
 
 const STATUS: Record<OrderRow["status"], { label: Pair; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -36,7 +36,7 @@ function OrderItem({ order, db, showCustomer, onChanged }: { order: OrderRow; db
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold">{order.stores?.name}</h2>
-          <p className="text-sm text-muted-foreground">{showCustomer && order.customers && t(`${order.customers.name}님, `, `${order.customers.name}, `)}{timeAgo(order.created_at, t)}</p>
+          <p className="text-sm text-muted-foreground">{showCustomer && order.customers && `${customerLabel(order.customers, t)}, `}{timeAgo(order.created_at, t)}</p>
         </div>
         <Badge variant={STATUS[order.status].variant}>{t(...STATUS[order.status].label)}</Badge>
       </div>

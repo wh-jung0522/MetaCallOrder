@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Account, LoginForm, useSession } from "../auth";
 import { useT, type Pair } from "../i18n";
-import { isToday, itemLabel, timeAgo, useLinkedIds, useOrders, won, type OrderRow } from "../orders";
+import { customerLabel, isToday, itemLabel, timeAgo, useLinkedIds, useOrders, won, type OrderRow } from "../orders";
 import { publicDb, supabase } from "../supabase";
 
 const COLUMNS: { title: Pair; statuses: OrderRow["status"][]; empty: Pair }[] = [
@@ -32,7 +32,7 @@ function OrderCard({ order, db, isNew, onError, onChanged }: { order: OrderRow; 
     <Card data-new={isNew && order.status === "pending"} className="data-[new=true]:ring-2 data-[new=true]:ring-primary">
       <CardHeader>
         <CardTitle>{order.stores?.name}</CardTitle>
-        <CardDescription>{timeAgo(order.created_at, t)}{order.status === "cancelled" && t(", 보호자가 취소", ", cancelled by the guardian")}{order.status === "rejected" && t(", 가게에서 거절", ", declined by the store")}</CardDescription>
+        <CardDescription>{order.customers && `${customerLabel(order.customers, t)}, `}{timeAgo(order.created_at, t)}{order.status === "cancelled" && t(", 보호자가 취소", ", cancelled by the guardian")}{order.status === "rejected" && t(", 가게에서 거절", ", declined by the store")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <ul className="flex flex-col gap-1 text-lg font-semibold">

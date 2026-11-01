@@ -124,11 +124,13 @@ export class CallSession extends DurableObject<Env> {
     this.callId = url.searchParams.get("callId")!;
     server.addEventListener("message", (event) => {
       if (this.transport || typeof event.data !== "string") return;
-      const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string; start?: { streamSid?: string } };
+      const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string; lang?: string; start?: { streamSid?: string } };
       // The Worker signed this caller id before routing here, and it is empty when the number is blocked; the simulator states its own.
       const isPhone = url.pathname === "/phone/stream";
       if (isPhone ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
       const callerId = isPhone ? (url.searchParams.get("caller") ?? "") : start.callerId!;
+      // The simulator speaks the screen's language, English unless told otherwise.
+      if (!isPhone) this.dialedLanguage = start.lang === "ko" ? "ko" : "en";
       this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId, start.start?.streamSid) : new SimulatorTransport(server, callerId)).catch((error) => {
         console.error("call start failed", error);
         server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
@@ -155,7 +157,12 @@ export class CallSession extends DurableObject<Env> {
     this.llm = new OpenAI({ apiKey: this.env.META_API_KEY, baseURL: this.env.META_BASE_URL, maxRetries: 1 });
 
     // Anyone with the simulator can pick any caller id, so real customers must stay out of reach there. A phone caller id comes from the carrier.
-    const found = callerId ? await customers.findByPhone(callerId) : null;
+    let found = callerId ? await customers.findByPhone(callerId) : null;
+    // Anyone can order: a number seen for the first time is registered on the spot. A simulator caller is demo data.
+    if (callerId && !found) {
+      await customers.ensureCaller(callerId, transport.kind === "simulator");
+      found = await customers.findByPhone(callerId);
+    }
     this.customer = transport.kind === "phone" || found?.is_demo ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
     this.session.language = this.dialedLanguage ?? (!callerId || callerId.startsWith("+82") ? "ko" : "en");
@@ -245,7 +252,7 @@ export class CallSession extends DurableObject<Env> {
     this.say(PHRASES[language].greeting, language, `${language}-greeting`);
     this.say(PHRASES[other].otherLanguage, other, `${other}-other`);
     if (!this.customer) {
-      this.messages.push({ role: "user", content: "[시스템 상태] 전화가 연결됐습니다. 미등록 번호입니다." });
+      this.messages.push({ role: "user", content: "[시스템 상태] 전화가 연결됐습니다. 발신번호를 알 수 없습니다." });
       this.enqueueTurn();
       return;
     }
