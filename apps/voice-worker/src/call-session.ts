@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { createDb, missingSecrets, type Env } from "./env";
 import { MuseStt } from "./stt";
 import { SimulatorTransport, type TelephonyTransport } from "./transport";
-import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, type Tts } from "./tts";
+import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, TypecastTts, type Tts } from "./tts";
 
 const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silence: string; failSafe: string; handoff: string }> = {
   ko: {
@@ -144,15 +144,15 @@ export class CallSession extends DurableObject<Env> {
 
     await this.calls.start(this.callId, this.customer?.id ?? null);
 
+    const ttsOptions = { url: this.env.TTS_URL, apiKey: this.env.TTS_API_KEY, model: this.env.TTS_MODEL, voice: this.env.TTS_VOICE };
+    const ttsHandlers = {
+      onAudio: (pcm: Int16Array) => this.onTtsAudio(pcm),
+      onFirstChunk: () => this.mark("tts_first_chunk_ms"),
+      onFailure: (reason: string) => this.failSafe(reason),
+    };
+    if (this.env.TTS_PROVIDER === "typecast") this.tts = new TypecastTts(ttsHandlers, ttsOptions);
     if (this.env.TTS_PROVIDER === "soniox") {
-      const tts = new SonioxTts(
-        {
-          onAudio: (pcm) => this.onTtsAudio(pcm),
-          onFirstChunk: () => this.mark("tts_first_chunk_ms"),
-          onFailure: (reason) => this.failSafe(reason),
-        },
-        { url: this.env.TTS_URL, apiKey: this.env.TTS_API_KEY, model: this.env.TTS_MODEL, voice: this.env.TTS_VOICE },
-      );
+      const tts = new SonioxTts(ttsHandlers, ttsOptions);
       await tts.connect();
       this.tts = tts;
     }

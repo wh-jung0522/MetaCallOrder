@@ -1,8 +1,13 @@
 import type { Language } from "@callorder/agents";
+import { resample } from "@callorder/audio";
 import { connectWebSocket } from "./upstream";
 
 export const TTS_SAMPLE_RATE = 24000;
 const KEEPALIVE_MS = 30_000;
+const TYPECAST_SAMPLE_RATE = 32000;
+const WAV_HEADER_BYTES = 44;
+const TYPECAST_LANGUAGE: Record<Language, string> = { ko: "kor", en: "eng" };
+const TTS_RESPONSE_TIMEOUT_MS = 10_000;
 
 export interface TtsHandlers {
   onAudio(pcm: Int16Array): void;
@@ -134,6 +139,91 @@ export class SonioxTts implements Tts {
     bytes.set(chunk.subarray(0, usable - carried), carried);
     this.carry = (chunk.length + carried) % 2 ? chunk[chunk.length - 1]! : null;
     this.handlers.onAudio(new Int16Array(bytes.buffer));
+  }
+}
+
+// Typecast streams over plain HTTP, one request per sentence, so sentences stay in order by running one at a time.
+export class TypecastTts implements Tts {
+  private queue: { text: string; speed: number; language: Language }[] = [];
+  private active: AbortController | null = null;
+  private drainWaiters: (() => void)[] = [];
+
+  constructor(private handlers: TtsHandlers, private options: { url: string; apiKey: string; model: string; voice: string }) {}
+
+  get busy(): boolean {
+    return this.active !== null || this.queue.length > 0;
+  }
+
+  speak(text: string, speed: number, language: Language): void {
+    this.queue.push({ text, speed, language });
+    if (!this.active) void this.pump();
+  }
+
+  cancel(): void {
+    this.queue = [];
+    this.active?.abort();
+  }
+
+  drained(): Promise<void> {
+    if (!this.busy) return Promise.resolve();
+    return new Promise((resolve) => this.drainWaiters.push(resolve));
+  }
+
+  close(): void {
+    this.cancel();
+  }
+
+  private async pump(): Promise<void> {
+    while (this.queue.length) {
+      const next = this.queue.shift()!;
+      const abort = new AbortController();
+      this.active = abort;
+      try {
+        await this.synthesize(next, abort);
+      } catch (error) {
+        if (!abort.signal.aborted) this.handlers.onFailure(`tts: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    this.active = null;
+    this.drainWaiters.splice(0).forEach((resolve) => resolve());
+  }
+
+  private async synthesize(next: { text: string; speed: number; language: Language }, abort: AbortController): Promise<void> {
+    const timer = setTimeout(() => abort.abort(), TTS_RESPONSE_TIMEOUT_MS);
+    const response = await fetch(this.options.url, {
+      method: "POST",
+      headers: { "X-API-KEY": this.options.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        voice_id: this.options.voice,
+        text: next.text,
+        model: this.options.model,
+        language: TYPECAST_LANGUAGE[next.language],
+        output: { audio_format: "wav", audio_tempo: Math.min(1.3, Math.max(0.7, next.speed)) },
+      }),
+      signal: abort.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status} ${await response.text()}`);
+
+    let skip = WAV_HEADER_BYTES;
+    let held = new Uint8Array(0);
+    let first = true;
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      if (abort.signal.aborted) return;
+      const body = chunk.subarray(Math.min(skip, chunk.length));
+      skip -= chunk.length - body.length;
+      const bytes = new Uint8Array(held.length + body.length);
+      bytes.set(held);
+      bytes.set(body, held.length);
+      // 32 kHz to 24 kHz maps every 4 samples to 3, so only whole groups go out and chunk edges cannot click.
+      const usable = bytes.length - (bytes.length % 8);
+      held = bytes.slice(usable);
+      if (!usable) continue;
+      if (first) {
+        first = false;
+        this.handlers.onFirstChunk();
+      }
+      this.handlers.onAudio(resample(new Int16Array(bytes.buffer, 0, usable / 2), TYPECAST_SAMPLE_RATE, TTS_SAMPLE_RATE));
+    }
   }
 }
 

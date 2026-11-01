@@ -16,7 +16,7 @@ export interface Env {
   META_STT_MODEL: string;
   META_BASE_URL: string;
   META_STT_URL: string;
-  TTS_PROVIDER: "soniox" | "none";
+  TTS_PROVIDER: "typecast" | "soniox" | "none";
   TTS_API_KEY: string;
   TTS_URL: string;
   TTS_MODEL: string;

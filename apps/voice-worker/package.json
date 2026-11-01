@@ -10,6 +10,7 @@
   "dependencies": {
     "@callorder/adapters": "workspace:*",
     "@callorder/agents": "workspace:*",
+    "@callorder/audio": "workspace:*",
     "@supabase/supabase-js": "^2.118.0",
     "openai": "^7.47.0"
   },

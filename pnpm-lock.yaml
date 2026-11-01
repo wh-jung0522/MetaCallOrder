@@ -184,6 +184,9 @@ importers:
       '@callorder/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@callorder/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@supabase/supabase-js':
         specifier: ^2.118.0
         version: 2.118.0
