@@ -78,6 +78,8 @@ export class CallSession extends DurableObject<Env> {
   override async fetch(request: Request): Promise<Response> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
+    // Recent compatibility dates default to Blob, which reads as zero-length audio here.
+    server.binaryType = "arraybuffer";
     server.accept();
     this.callId = new URL(request.url).searchParams.get("callId")!;
     server.addEventListener("message", (event) => {

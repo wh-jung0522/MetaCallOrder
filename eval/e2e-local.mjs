@@ -111,7 +111,7 @@ const providers = createServer((req, res) => {
 });
 
 let stt = null;
-const sttStats = { handshake: null, frames: 0 };
+const sttStats = { handshake: null, voicedFrames: 0 };
 const ttsStats = { auth: null, configs: [] };
 const sttServer = new WebSocketServer({ noServer: true });
 const ttsServer = new WebSocketServer({ noServer: true });
@@ -120,7 +120,11 @@ const TTS_MS = 400;
 sttServer.on("connection", (socket) => {
   stt = socket;
   socket.on("message", (data, isBinary) => {
-    if (isBinary) return void sttStats.frames++;
+    if (isBinary) {
+      // Silence padding also arrives here, so only frames carrying samples prove caller audio got through.
+      if (data.some((byte) => byte !== 0)) sttStats.voicedFrames++;
+      return;
+    }
     const message = JSON.parse(data.toString());
     if (message.authorization) {
       sttStats.handshake = message;
@@ -221,8 +225,8 @@ try {
   assert.equal(ttsStats.configs[0].language, "ko");
 
   // Caller audio reaches the STT and agent audio reaches the caller, as whole 16-bit samples
-  client.send(new ArrayBuffer(640));
-  await until(() => sttStats.frames > 0, "audio forwarded to stt");
+  client.send(new Int16Array(320).fill(1000).buffer);
+  await until(() => sttStats.voicedFrames > 0, "caller audio forwarded to stt");
   await until(() => audioBytes > 0, "agent audio received");
   await sleep(1500);
   assert.equal(audioBytes % 2, 0, "audio must be whole samples");
