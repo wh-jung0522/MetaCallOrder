@@ -26,6 +26,7 @@ export interface Store {
   id: string;
   name: string;
   name_en?: string | null;
+  category?: string | null;
   phone_e164: string;
   address: string;
   lat: number | null;
@@ -126,7 +127,9 @@ export function matchScore(query: string, candidate: string): number {
   return (2 * hits) / (bigrams(q).length + bigrams(c).length);
 }
 
-export function rankMenu(items: MenuItem[], query: string, threshold = 0.3): MenuItem[] {
+const MATCH_THRESHOLD = 0.3;
+
+export function rankMenu(items: MenuItem[], query: string, threshold = MATCH_THRESHOLD): MenuItem[] {
   const score = (item: MenuItem) =>
     Math.max(matchScore(query, item.name), ...item.aliases.map((alias) => matchScore(query, alias)));
   return items
@@ -155,12 +158,22 @@ export class SupabaseMerchantAdapter implements MerchantAdapter {
     const { data, error } = await this.db.from("stores").select("*").eq("is_open", true);
     if (error) throw error;
     // ponytail: filters every store in memory, use PostGIS once there are thousands of stores
-    return (data as Store[])
+    const nearby = (data as Store[])
       .map((store) => ({ store, km: distanceKm(lat, lng, store.lat ?? lat, store.lng ?? lng) }))
       .filter(({ km }) => km <= DELIVERY_RADIUS_KM)
-      .filter(({ store }) => !query || Math.max(matchScore(query, store.name), matchScore(query, store.name_en ?? "")) >= 0.3)
       .sort((a, b) => a.km - b.km)
       .map(({ store }) => store);
+    if (!query) return nearby;
+    // "치킨" names a kind of food or a dish as often as a store, so a store matches on any of them.
+    const { data: menu, error: menuError } = await this.db.from("menu_items").select("store_id, name, name_en, aliases").eq("is_available", true);
+    if (menuError) throw menuError;
+    const close = (text?: string | null) => matchScore(query, text ?? "") >= MATCH_THRESHOLD;
+    const selling = new Set((menu as Pick<MenuItem, "store_id" | "name" | "name_en" | "aliases">[])
+      .filter((item) => close(item.name) || close(item.name_en) || item.aliases.some(close))
+      .map((item) => item.store_id));
+    const matched = nearby.filter((store) => close(store.name) || close(store.name_en) || close(store.category) || selling.has(store.id));
+    // Nothing matched is not the same as nothing nearby: the agent can still offer what is open.
+    return matched.length ? matched : nearby;
   }
 
   async getMenu(storeId: string): Promise<MenuItem[]> {

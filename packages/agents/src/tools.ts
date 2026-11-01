@@ -63,7 +63,7 @@ export async function executeOrderTool(name: string, args: Record<string, any>, 
       const customer = requireCustomer(ctx);
       if (customer.lat == null || customer.lng == null) throw new Error("고객 주소의 좌표가 없습니다");
       const stores = await ctx.adapter.searchStores({ lat: customer.lat, lng: customer.lng, query: args.query });
-      return stores.map(({ id, name, name_en, min_order_amount, delivery_fee, eta_minutes }) => ({ id, name, name_en, min_order_amount, delivery_fee, eta_minutes }));
+      return stores.map(({ id, name, name_en, category, min_order_amount, delivery_fee, eta_minutes }) => ({ id, name, name_en, category, min_order_amount, delivery_fee, eta_minutes }));
     }
     case "search_menu": {
       const menu = rankMenu(await ctx.adapter.getMenu(args.store_id), args.query);

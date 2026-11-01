@@ -141,7 +141,9 @@ export function SimulatorPage() {
       const list = await response.json();
       localStorage.setItem("sim-code", value);
       setCallers(list);
-      setCallerId((current) => (current === UNREGISTERED && list[0] ? list[0].phone_e164 : current));
+      // The first caller speaks the screen's language, so a Korean screen does not open on a US number.
+      const first = list.find((caller: { phone_e164: string }) => caller.phone_e164.startsWith("+82") === (lang === "ko")) ?? list[0];
+      setCallerId((current) => (current === UNREGISTERED && first ? first.phone_e164 : current));
       setVerified(true);
       setError(null);
     } catch (failure) {
@@ -441,7 +443,7 @@ export function SimulatorPage() {
           <p className="text-center text-sm text-muted-foreground">{t("헤드셋을 쓰면 더 잘 들립니다. 확인할 때 1번은 네, 2번은 아니요, 0번은 상담원입니다.", "A headset makes it easier to hear. When asked to confirm, press 1 for yes, 2 for no, or 0 for an operator.")}</p>
         </section>
 
-        <section aria-label={t("통화 내용", "Transcript")} className="flex h-[min(72svh,720px)] min-h-[440px] flex-col rounded-xl border">
+        <section aria-label={t("통화 내용", "Transcript")} className="flex h-[min(60svh,720px)] min-h-72 flex-col rounded-xl border lg:h-[min(72svh,720px)]">
           {silentMode && inCall && <Alert className="m-3 w-auto"><AlertDescription>{t("음성 안내가 꺼져 있어 답변은 글자로만 나옵니다.", "Voice replies are off, so answers appear as text only.")}</AlertDescription></Alert>}
           {timeline.length === 0 && !partial ? (
             <Empty className="flex-1">
