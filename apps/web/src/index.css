@@ -144,72 +144,79 @@ body {
   word-break: keep-all;
 }
 
-/* The desk phone is the one object shadcn has no component for. */
-.deskphone {
-  padding: 16px 18px 20px;
-  border-radius: 24px;
-  background: linear-gradient(170deg, oklch(0.95 0.004 258), oklch(0.87 0.008 258));
-  box-shadow: inset 0 1px 0 #fff, inset 0 -3px 6px oklch(0.5 0.02 258 / 25%), 0 14px 30px oklch(0.3 0.02 258 / 22%);
+/* The phone is the one object shadcn has no component for. */
+.handset {
+  width: 100%;
+  max-width: 300px;
+  padding: 9px;
+  border-radius: 46px;
+  background: #1c1c1e;
+  box-shadow: 0 0 0 1px #3a3a3c, 0 18px 40px -16px rgb(0 0 0 / 0.45);
 }
-.lcd {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: oklch(0.72 0.03 200);
-  color: oklch(0.25 0.03 220);
-  box-shadow: inset 0 2px 5px oklch(0.2 0 0 / 35%);
-  font-variant-numeric: tabular-nums;
-  transition: background-color 0.3s;
-}
-.lcd[data-lit="true"] {
-  background: oklch(0.88 0.08 200);
-}
-.keycap {
+.handset-screen {
+  position: relative;
   display: flex;
+  flex-direction: column;
+  min-height: 590px;
+  padding: 14px 22px 26px;
+  border-radius: 38px;
+  background: #000;
+  color: #fff;
+}
+.handset-screen::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 78px;
+  height: 22px;
+  border-radius: 12px;
+  background: #1c1c1e;
+  transform: translateX(-50%);
+}
+.dial-number {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 26px;
+  font-weight: 500;
+  text-align: center;
+}
+.dial-number::placeholder { color: #8e8e93; font-size: 18px; }
+.dial-key,
+.round-key {
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 52px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #fff, oklch(0.93 0.004 258));
-  box-shadow: 0 2px 0 oklch(0.68 0.01 258), 0 3px 6px oklch(0.4 0.02 258 / 22%);
-  font-size: 1.35rem;
-  font-weight: 700;
-  line-height: 1.05;
-  cursor: pointer;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: #333335;
+  color: #fff;
+  transition: background 0.1s;
 }
-.keycap:active:not(:disabled) {
-  transform: translateY(2px);
-  box-shadow: none;
-}
-.keycap:disabled {
-  color: oklch(0.6 0.01 258);
-  cursor: not-allowed;
-}
-.keycap:focus-visible,
-.callkey:focus-visible {
-  outline: 3px solid var(--ring);
+.dial-key:active:not(:disabled),
+.round-key:active:not(:disabled) { background: #636366; }
+.dial-key:disabled { opacity: 0.35; }
+.dial-key b { font-size: 26px; font-weight: 400; line-height: 1.1; }
+.dial-key small { min-height: 11px; font-size: 9px; font-weight: 600; letter-spacing: 0.12em; line-height: 1; }
+.round-key[aria-pressed="true"] { background: #fff; color: #000; }
+.round-key[data-kind="call"] { background: #30b350; }
+.round-key[data-kind="call"]:active:not(:disabled) { background: #248a3d; }
+.round-key[data-kind="end"] { background: #eb3b30; }
+.round-key[data-kind="end"]:active:not(:disabled) { background: #b92c23; }
+.round-key:disabled { opacity: 0.5; }
+.dial-key:focus-visible,
+.round-key:focus-visible,
+.dial-delete:focus-visible {
+  outline: 3px solid #0a84ff;
   outline-offset: 2px;
 }
-.callkey {
-  display: grid;
-  place-items: center;
-  height: 56px;
-  border-radius: 14px;
-  color: #fff;
-  cursor: pointer;
-}
-.callkey:disabled {
-  filter: grayscale(0.8) opacity(0.5);
-  cursor: not-allowed;
-}
-.callkey[data-kind="call"] {
-  background: oklch(0.55 0.14 155);
-  box-shadow: 0 3px 0 oklch(0.42 0.11 155);
-}
-.callkey[data-kind="end"] {
-  background: oklch(0.55 0.2 27);
-  box-shadow: 0 3px 0 oklch(0.42 0.16 27);
-}
+
 .meter {
   --level: 0;
   display: flex;

@@ -12,6 +12,7 @@ export interface Customer {
   daily_spend_limit: number;
   preferred_speech_rate: number;
   is_demo: boolean;
+  auto_created?: boolean;
 }
 
 export interface Guardian {

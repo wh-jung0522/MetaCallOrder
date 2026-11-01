@@ -1,4 +1,4 @@
-import { Phone, PhoneOff } from "lucide-react";
+import { BatteryFull, Delete, Grid3x3, Mic, MicOff, Phone, PhoneOff, SignalHigh, Wifi } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { MessageScroller, MessageScrollerButton, MessageScrollerContent, MessageScrollerItem, MessageScrollerProvider, MessageScrollerViewport } from "@/components/ui/message-scroller";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -23,6 +22,14 @@ const WS_URL = import.meta.env.VITE_VOICE_WS_URL as string;
 const HTTP_URL = WS_URL.replace(/^ws/, "http").replace(/\/sim\/stream$/, "");
 const UNREGISTERED = "+821099999999";
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
+const KEY_LETTERS: Record<string, string> = { "2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ" };
+
+// 010-1234-5678 and +1 415 555 0101 both become E.164. Null when it cannot be a phone number.
+function toE164(typed: string): string | null {
+  const digits = typed.replace(/[^\d+]/g, "");
+  const e164 = digits.startsWith("0") ? `+82${digits.slice(1)}` : digits.startsWith("+") ? digits : `+${digits}`;
+  return /^\+\d{8,15}$/.test(e164) ? e164 : null;
+}
 const INPUT_RATE = 16000;
 const FRAME_BYTES = 640;
 const FRAME_MS = 20;
@@ -103,7 +110,15 @@ export function SimulatorPage() {
   const [verified, setVerified] = useState(false);
   const [checking, setChecking] = useState(false);
   const [callers, setCallers] = useState<{ name: string; phone_e164: string }[]>([]);
-  const [callerId, setCallerId] = useState(UNREGISTERED);
+  const [callerId, setCallerId] = useState(() => localStorage.getItem("sim-my-number") ?? UNREGISTERED);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  const [showKeypad, setShowKeypad] = useState(false);
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 10_000);
+    return () => clearInterval(timer);
+  }, []);
   const [developer, setDeveloper] = useState(false);
   const [phoneQuality, setPhoneQuality] = useState(true);
   const [noise, setNoise] = useState(0);
@@ -259,6 +274,13 @@ export function SimulatorPage() {
 
   const startCall = async () => {
     setError(null);
+    const e164 = toE164(callerId);
+    if (!e164) return setError(["전화번호를 확인해 주세요. 예: 010-1234-5678", "Please check the phone number. For example: +1 415 555 0101"]);
+    if (!callers.some((caller) => caller.phone_e164 === e164)) localStorage.setItem("sim-my-number", e164);
+    setCallerId(e164);
+    mutedRef.current = false;
+    setMuted(false);
+    setShowKeypad(false);
     setTimeline([]);
     setActivity([]);
     setLatency({});
@@ -290,7 +312,8 @@ export function SimulatorPage() {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         context.createMediaStreamSource(stream).connect(node);
         node.port.onmessage = ({ data }) => {
-          send(data);
+          // Silence, not nothing: the speech service ends a session whose audio stops arriving.
+          send(mutedRef.current ? new ArrayBuffer(data.byteLength) : data);
           let peak = 0;
           for (const sample of new Int16Array(data)) peak = Math.max(peak, Math.abs(sample));
           meter.current?.style.setProperty("--level", String(Math.min(1, (peak / 0x7fff) * 1.6)));
@@ -301,7 +324,7 @@ export function SimulatorPage() {
       const ws = new WebSocket(`${WS_URL}?callId=${callId}&code=${encodeURIComponent(code)}`);
       ws.binaryType = "arraybuffer";
       socket.current = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ type: "start", callerId, phoneQuality, lang }));
+      ws.onopen = () => ws.send(JSON.stringify({ type: "start", callerId: e164, phoneQuality, lang }));
       ws.onmessage = ({ data }) => onServerMessage(data);
       ws.onerror = () => setError(["서버에 연결하지 못했습니다. 잠시 뒤 다시 걸어 주세요.", "Could not reach the server. Please call again in a moment."]);
       ws.onclose = () => {
@@ -365,6 +388,10 @@ export function SimulatorPage() {
   }
 
   const callerName = callers.find((caller) => caller.phone_e164 === callerId)?.name;
+  const isPreset = Boolean(callerName) || callerId === UNREGISTERED;
+  const dialDigit = (key: string) => setCallerId((current) => (isPreset ? "" : current) + (key === "*" ? "+" : key));
+  const pressKey = (key: string) => send(JSON.stringify({ type: "dtmf", digit: key }));
+  const onCall = inCall || status === "transferred";
 
   const modeSwitch = (
     <div role="group" aria-label={t("전화 방법", "How to call")} className="mx-auto flex w-full max-w-sm gap-1 rounded-lg bg-muted p-1">
@@ -398,49 +425,92 @@ export function SimulatorPage() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
       {modeSwitch}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <Field className="w-72">
-          <FieldLabel htmlFor="caller">{t("어느 번호로 걸까요?", "Which number are you calling from?")}</FieldLabel>
-          <Select value={callerId} onValueChange={setCallerId} disabled={inCall}>
-            <SelectTrigger id="caller" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {callers.filter((caller) => caller.phone_e164 !== UNREGISTERED).map((caller) => <SelectItem key={caller.phone_e164} value={caller.phone_e164}>{caller.name} ({formatPhone(caller.phone_e164)})</SelectItem>)}
-                <SelectItem value={UNREGISTERED}>{t("처음 거는 번호", "First-time number")} ({formatPhone(UNREGISTERED)})</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Field>
-        <div className="flex items-center gap-2 text-sm">
-          <Switch id="developer" checked={developer} onCheckedChange={setDeveloper} />
-          <label htmlFor="developer">{t("개발자 보기", "Developer view")}</label>
-        </div>
+      <div className="flex items-center justify-end gap-2 text-sm">
+        <Switch id="developer" checked={developer} onCheckedChange={setDeveloper} />
+        <label htmlFor="developer">{t("개발자 보기", "Developer view")}</label>
       </div>
 
       {error && <Alert variant="destructive"><AlertDescription>{t(...error)}</AlertDescription></Alert>}
 
       <div className={developer ? "grid flex-1 items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)_340px]" : "grid flex-1 items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)]"}>
-        <section aria-label={t("전화기", "Phone")} className="mx-auto flex w-full max-w-[300px] flex-col gap-3">
-          <div className="deskphone flex flex-col gap-4">
-            <div className="lcd" data-lit={inCall || status === "transferred"} role="status">
-              <div className="flex justify-between text-sm font-bold"><span>{t(...STATUS_TEXT[status])}</span><span>{status === "in_call" ? elapsed : "--:--"}</span></div>
-              <div className="text-xl font-extrabold leading-relaxed whitespace-nowrap">{formatPhone(callerId)}</div>
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span>{callerName ?? t("처음 거는 번호", "First-time number")}</span>
-                <div className="meter" ref={meter} aria-hidden="true"><i /><i /><i /><i /><i /></div>
+        <section aria-label={t("전화기", "Phone")} className="mx-auto flex w-full max-w-[300px] flex-col items-center gap-3">
+          <div className="handset">
+            <div className="handset-screen">
+              <div className="flex h-6 items-center justify-between px-1 text-xs font-semibold" aria-hidden="true">
+                <span>{clock.toLocaleTimeString(t("ko-KR", "en-US"), { hour: "numeric", minute: "2-digit", hour12: false })}</span>
+                <span className="flex items-center gap-1"><SignalHigh className="size-3.5" /><Wifi className="size-3.5" /><BatteryFull className="size-4" /></span>
               </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {KEYS.map((key) => (
-                <button key={key} type="button" className="keycap" disabled={status !== "in_call"} aria-label={t(`${key}번`, `Key ${key}`)} onClick={() => send(JSON.stringify({ type: "dtmf", digit: key }))}>{key}</button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button type="button" className="callkey" data-kind="call" disabled={inCall} onClick={startCall} aria-label={t("전화 걸기", "Make a call")}><Phone /></button>
-              <button type="button" className="callkey" data-kind="end" disabled={!inCall && status !== "transferred"} onClick={hangUp} aria-label={t("전화 끊기", "Hang up")}><PhoneOff /></button>
+
+              {onCall ? (
+                <div className="flex flex-1 flex-col items-center pt-10" role="status">
+                  <div className="flex size-20 items-center justify-center rounded-full bg-[#636366] text-3xl font-medium">{t("콜", "C")}</div>
+                  <div className="mt-3 text-2xl font-medium">{t("콜오더", "CallOrder")}</div>
+                  <div className="mt-1 text-sm text-[#aeaeb2]">{status === "in_call" ? elapsed : t(...STATUS_TEXT[status])}</div>
+                  <div className="mt-1 text-xs whitespace-nowrap text-[#8e8e93]">{t("내 번호", "My number")} {callerName ? `${callerName}, ` : ""}{formatPhone(callerId)}</div>
+                  <div className="meter mt-4" ref={meter} aria-hidden="true"><i /><i /><i /><i /><i /></div>
+
+                  {showKeypad ? (
+                    <div className="mt-auto grid grid-cols-3 justify-items-center gap-y-2.5">
+                      {KEYS.map((key) => (
+                        <button key={key} type="button" className="dial-key" style={{ width: 58, height: 58 }} disabled={status !== "in_call"} aria-label={t(`${key}번`, `Key ${key}`)} onClick={() => pressKey(key)}><b>{key}</b></button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-auto flex w-full justify-around pb-4">
+                      <div className="flex flex-col items-center gap-1.5 text-xs">
+                        <button type="button" className="round-key" aria-pressed={muted} disabled={status !== "in_call"} aria-label={t("음소거", "Mute")} onClick={() => { mutedRef.current = !muted; setMuted(!muted); }}>{muted ? <MicOff /> : <Mic />}</button>
+                        {t("음소거", "Mute")}
+                      </div>
+                      <div className="flex flex-col items-center gap-1.5 text-xs">
+                        <button type="button" className="round-key" disabled={status !== "in_call"} aria-label={t("키패드", "Keypad")} onClick={() => setShowKeypad(true)}><Grid3x3 /></button>
+                        {t("키패드", "Keypad")}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid w-full grid-cols-3 items-center justify-items-center">
+                    {showKeypad && <button type="button" className="col-start-3 row-start-1 text-sm" onClick={() => setShowKeypad(false)}>{t("가리기", "Hide")}</button>}
+                    <button type="button" className="round-key col-start-2 row-start-1" data-kind="end" onClick={hangUp} aria-label={t("전화 끊기", "Hang up")}><PhoneOff /></button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col pt-8">
+                  <label htmlFor="my-number" className="text-center text-xs text-[#aeaeb2]">{t("내 번호를 누르고 전화를 거세요", "Enter your number, then call")}</label>
+                  <input
+                    id="my-number"
+                    className="dial-number"
+                    type="tel"
+                    autoComplete="tel"
+                    placeholder={t("010-0000-0000", "+1 000 000 0000")}
+                    value={isPreset && callerId !== UNREGISTERED ? formatPhone(callerId) : callerId === UNREGISTERED ? "" : callerId}
+                    onChange={(event) => setCallerId(event.target.value.replace(/[^\d+\- ]/g, ""))}
+                  />
+                  <div className="h-5 text-center text-xs text-[#30b350]">{callerName ?? ""}</div>
+                  <div className="mt-auto grid grid-cols-3 justify-items-center gap-y-3">
+                    {KEYS.map((key) => (
+                      <button key={key} type="button" className="dial-key" disabled={key === "#"} aria-label={key === "*" ? "+" : key} onClick={() => dialDigit(key)}>
+                        <b>{key === "*" ? "+" : key}</b><small>{KEY_LETTERS[key] ?? ""}</small>
+                      </button>
+                    ))}
+                    <button type="button" className="round-key col-start-2" data-kind="call" onClick={startCall} aria-label={t("콜오더에 전화 걸기", "Call CallOrder")}><Phone className="fill-current" /></button>
+                    {callerId && !isPreset && (
+                      <button type="button" className="dial-delete flex size-[66px] items-center justify-center rounded-full" aria-label={t("한 글자 지우기", "Delete one digit")} onClick={() => setCallerId((current) => current.slice(0, -1))}><Delete /></button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-          <p className="text-center text-sm text-muted-foreground">{t("헤드셋을 쓰면 더 잘 들립니다. 확인할 때 1번은 네, 2번은 아니요, 0번은 상담원입니다.", "A headset makes it easier to hear. When asked to confirm, press 1 for yes, 2 for no, or 0 for an operator.")}</p>
+
+          {!onCall && (
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {callers.filter((caller) => caller.phone_e164 !== UNREGISTERED).map((caller) => (
+                <Button key={caller.phone_e164} size="sm" className="rounded-full" variant={caller.phone_e164 === callerId ? "secondary" : "outline"} aria-pressed={caller.phone_e164 === callerId} onClick={() => setCallerId(caller.phone_e164)}>{caller.name}</Button>
+              ))}
+            </div>
+          )}
+          <p className="text-center text-sm text-muted-foreground">{t("처음 거는 번호는 바로 등록되어 시연용 주소로 주문됩니다. 위 이름을 누르면 시연 고객으로 걸립니다.", "A new number is registered at once and orders go to a demo address. Tap a name above to call as a demo customer.")}</p>
+          <p className="text-center text-sm text-muted-foreground">{t("확인할 때 키패드 1번은 네, 2번은 아니요, 0번은 상담원입니다.", "When asked to confirm, press 1 for yes, 2 for no, 0 for an operator.")}</p>
         </section>
 
         <section aria-label={t("통화 내용", "Transcript")} className="flex h-[min(60svh,720px)] min-h-72 flex-col rounded-xl border lg:h-[min(72svh,720px)]">
@@ -448,7 +518,7 @@ export function SimulatorPage() {
           {timeline.length === 0 && !partial ? (
             <Empty className="flex-1">
               <EmptyHeader>
-                <EmptyTitle>{status === "connecting" ? t("연결하고 있습니다", "Connecting") : t("초록 버튼을 눌러 전화를 거세요", "Press the green button to make a call")}</EmptyTitle>
+                <EmptyTitle>{status === "connecting" ? t("연결하고 있습니다", "Connecting") : t("초록 버튼을 눌러 전화를 거세요", "Press the green button to call")}</EmptyTitle>
                 <EmptyDescription>{t("나눈 말이 여기에 글자로 표시됩니다.", "What is said on the call will appear here as text.")}</EmptyDescription>
               </EmptyHeader>
             </Empty>

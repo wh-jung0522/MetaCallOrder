@@ -123,7 +123,7 @@ export class CallSession extends DurableObject<Env> {
       const start = JSON.parse(event.data) as { type?: string; event?: string; callerId?: string; lang?: string; start?: { streamSid?: string } };
       // The Worker signed this caller id before routing here, and it is empty when the number is blocked; the simulator states its own.
       const isPhone = url.pathname === "/phone/stream";
-      if (isPhone ? start.event !== "start" : start.type !== "start" || !start.callerId) return;
+      if (isPhone ? start.event !== "start" : start.type !== "start" || !/^\+\d{8,15}$/.test(start.callerId ?? "")) return;
       const callerId = isPhone ? (url.searchParams.get("caller") ?? "") : start.callerId!;
       // The simulator speaks the screen's language, English unless told otherwise.
       if (!isPhone) this.dialedLanguage = start.lang === "ko" ? "ko" : "en";
@@ -155,14 +155,14 @@ export class CallSession extends DurableObject<Env> {
     const customers = new CustomerRepository(this.db);
     this.llm = new OpenAI({ apiKey: this.env.META_API_KEY, baseURL: this.env.META_BASE_URL, maxRetries: 1 });
 
-    // Anyone with the simulator can pick any caller id, so real customers must stay out of reach there. A phone caller id comes from the carrier.
+    // Anyone with the simulator can state any caller id. Auto-created callers hold only a demo address, so they may be used; a customer with real details stays out of reach. A phone caller id comes from the carrier.
     let found = callerId ? await customers.findByPhone(callerId) : null;
-    // Anyone can order: a number seen for the first time is registered on the spot. A simulator caller is demo data.
+    // Anyone can order: a number seen for the first time is registered on the spot, with a demo address and kept private.
     if (callerId && !found) {
-      await customers.ensureCaller(callerId, transport.kind === "simulator");
+      await customers.ensureCaller(callerId);
       found = await customers.findByPhone(callerId);
     }
-    this.customer = transport.kind === "phone" || found?.is_demo ? found : null;
+    this.customer = transport.kind === "phone" || found?.is_demo || found?.auto_created ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
 
     this.tools = {
