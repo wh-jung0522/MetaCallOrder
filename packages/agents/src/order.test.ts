@@ -230,6 +230,14 @@ describe("conversation turn", () => {
     expect(messages.at(-1)).toEqual({ role: "assistant", content: spoken[1] });
   });
 
+  it("ends the call after the order even if the model forgets end_call", async () => {
+    const { ctx } = fixture();
+    ctx.placedOrder = { order_id: "o1", total: 20000, eta_minutes: 30 } as OrderResult;
+    const client = fakeClient([[{ choices: [{ delta: { content: "주문됐습니다." } }] }]]);
+    const action = await runConversationTurn([], ctx, { client, model: "m" }, hooks([]), new AbortController().signal);
+    expect(action).toEqual({ type: "end_call" });
+  });
+
   it("returns handoff as an action", async () => {
     const { ctx } = fixture();
     const client = fakeClient([[toolDelta("handoff", { reason: "요청" })]]);

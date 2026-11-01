@@ -172,7 +172,8 @@ export async function runConversationTurn(
       const { sentences, rest } = takeSentences(text);
       [...sentences, rest].forEach(say);
       messages.push({ role: "assistant", content: text });
-      return null;
+      // The model sometimes gives the arrival time and forgets end_call, which would leave the caller on the line.
+      return ctx.placedOrder ? { type: "end_call" } : null;
     }
 
     if (!spokeThisTurn) say(ctx.session.language === "en" ? FILLER_EN : FILLER);
