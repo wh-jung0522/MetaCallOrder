@@ -9,6 +9,9 @@ export interface SttHandlers {
 }
 
 const MAX_BUFFERED_FRAMES = 100; // 2 seconds of 20 ms frames
+const BYTES_PER_MS = 32; // PCM16 at 16 kHz
+const PACE_CHECK_MS = 200;
+const MAX_LAG_MS = 300;
 
 // Muse Voice Transcribe realtime. Auth travels in the first frame and audio waits for the ack.
 export class MuseStt {
@@ -16,6 +19,9 @@ export class MuseStt {
   private ready = false;
   private closing = false;
   private pending: ArrayBuffer[] = [];
+  private streamStartedAt = 0;
+  private sentMs = 0;
+  private paceTimer = 0;
 
   constructor(private handlers: SttHandlers) {}
 
@@ -37,7 +43,7 @@ export class MuseStt {
       partialMode: "CUMULATIVE",
       emitAudioProgress: false,
       keywords: options.keywords,
-      languageBias: ["Korean"],
+      languageBias: ["Korean", "English"],
     }));
   }
 
@@ -48,11 +54,24 @@ export class MuseStt {
       if (this.pending.length > MAX_BUFFERED_FRAMES) this.pending.shift();
       return;
     }
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame);
+    this.sendFrame(frame);
+  }
+
+  private sendFrame(frame: ArrayBuffer): void {
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    this.socket.send(frame);
+    this.sentMs += frame.byteLength / BYTES_PER_MS;
+  }
+
+  // Meta ends the session (1008) when audio falls behind real time, so a network stall or a call with no mic is padded with silence.
+  private keepPace(): void {
+    const lag = Date.now() - this.streamStartedAt - this.sentMs;
+    if (lag > MAX_LAG_MS) this.sendFrame(new ArrayBuffer(Math.floor(lag) * BYTES_PER_MS));
   }
 
   close(): void {
     this.closing = true;
+    clearInterval(this.paceTimer);
     try {
       if (this.ready) this.socket?.send(JSON.stringify({ type: "endStream" }));
       this.socket?.close(1000);
@@ -67,8 +86,10 @@ export class MuseStt {
       case undefined:
         if (!message.sessionId) return this.handlers.onFailure("stt handshake failed");
         this.ready = true;
-        for (const frame of this.pending) this.socket?.send(frame);
+        this.streamStartedAt = Date.now();
+        for (const frame of this.pending) this.sendFrame(frame);
         this.pending = [];
+        this.paceTimer = setInterval(() => this.keepPace(), PACE_CHECK_MS);
         return;
       case "speechStart":
         return this.handlers.onSpeechStart();

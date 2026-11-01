@@ -1,5 +1,5 @@
 import { CallRepository, CustomerRepository, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
-import { isBargeIn, isHandoffRequest, isRepeatRequest, OrderSession, runConversationTurn, type OrderToolContext, type TurnAction } from "@callorder/agents";
+import { isBargeIn, isHandoffRequest, isRepeatRequest, nextLanguage, OrderSession, runConversationTurn, type Language, type OrderToolContext, type TurnAction } from "@callorder/agents";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
@@ -8,9 +8,22 @@ import { MuseStt } from "./stt";
 import { SimulatorTransport, type TelephonyTransport } from "./transport";
 import { SilentTts, SonioxTts, TTS_SAMPLE_RATE, type Tts } from "./tts";
 
-const GREETING = "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.";
-const SILENCE_PROMPT = "천천히 말씀하셔도 됩니다.";
-const FAIL_SAFE = "죄송합니다. 지금 연결이 원활하지 않아 상담원에게 연결해 드릴게요.";
+const PHRASES: Record<Language, { greeting: string; otherLanguage: string; silence: string; failSafe: string; handoff: string }> = {
+  ko: {
+    greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
+    otherLanguage: "한국어로 말씀하셔도 됩니다.",
+    silence: "천천히 말씀하셔도 됩니다.",
+    failSafe: "죄송합니다. 지금 연결이 원활하지 않아 상담원에게 연결해 드릴게요.",
+    handoff: "상담원에게 연결해 드릴게요.",
+  },
+  en: {
+    greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
+    otherLanguage: "You can also speak English.",
+    silence: "Please take your time.",
+    failSafe: "I'm sorry, the connection is having trouble. Let me connect you to an agent.",
+    handoff: "Let me connect you to an agent.",
+  },
+};
 const HANDOFF_TARGET = "상담원";
 const SILENCE_MS = 7000;
 const MAX_SILENCE_PROMPTS = 3;
@@ -100,6 +113,7 @@ export class CallSession extends DurableObject<Env> {
     const found = await customers.findByPhone(callerId);
     this.customer = found?.is_demo ? found : null;
     this.spokenRate = this.customer?.preferred_speech_rate ?? 0.9;
+    this.session.language = callerId.startsWith("+82") ? "ko" : "en";
 
     this.tools = {
       callSid: this.callId,
@@ -163,7 +177,9 @@ export class CallSession extends DurableObject<Env> {
       keywords: await customers.sttKeywords(100),
     });
 
-    this.say(GREETING);
+    const language = this.session.language;
+    this.say(PHRASES[language].greeting);
+    this.say(PHRASES[language === "ko" ? "en" : "ko"].otherLanguage, language === "ko" ? "en" : "ko");
     const opening = this.customer
       ? `전화가 연결됐습니다. ${this.customer.name} 고객님께 짧게 인사하고, 최근 주문이 있는지 order_agent로 확인한 뒤 제안하세요.`
       : "전화가 연결됐습니다. 미등록 번호입니다.";
@@ -190,6 +206,7 @@ export class CallSession extends DurableObject<Env> {
   private onFinal(text: string): void {
     const utterance = text.trim();
     if (!utterance || this.ended) return;
+    this.session.language = nextLanguage(utterance, this.session.language);
     // "네" spoken over the recap is a backchannel, not agreement to an order they have not finished hearing.
     // Endpointing delay can deliver it after playback ended, hence the check from when the speech began.
     const overlapped = this.isPlaying() || this.speechOverlappedPlayback;
@@ -224,7 +241,7 @@ export class CallSession extends DurableObject<Env> {
     this.emit("dtmf", { digit });
     if (digit === "0") return this.handoff("키패드 0번");
     if (digit !== "1" && digit !== "2") return;
-    const spoken = digit === "1" ? "네" : "아니요";
+    const spoken = this.session.language === "en" ? (digit === "1" ? "yes" : "no") : digit === "1" ? "네" : "아니요";
     this.record("caller", `${spoken} (키패드 ${digit}번)`);
     // Pressing a key mid-recap means they did not wait to hear it, same as speaking over it.
     if (this.isPlaying()) this.bargeIn();
@@ -300,7 +317,7 @@ export class CallSession extends DurableObject<Env> {
       if (this.silencePrompts >= MAX_SILENCE_PROMPTS) return void this.endWith("silence");
       this.silencePrompts++;
       const lastSpoken = this.lastSpoken;
-      this.say(SILENCE_PROMPT);
+      this.say(PHRASES[this.session.language].silence);
       // A courtesy line must not break the "last thing said was the recap" rule for a late 네.
       this.session.noteSpoken(lastSpoken);
       this.lastSpoken = lastSpoken;
@@ -308,14 +325,14 @@ export class CallSession extends DurableObject<Env> {
     }, Math.max(0, this.playingUntil - Date.now()) + SILENCE_MS);
   }
 
-  private say(text: string): void {
+  private say(text: string, language: Language = this.session.language): void {
     if (this.ended) return;
     this.lastSpoken = text;
     this.session.noteSpoken(text);
     this.record("agent", text);
     this.usage.ttsChars += text.length;
     this.transport.sendEvent({ type: "assistant_text", text });
-    this.tts.speak(text, this.spokenRate);
+    this.tts.speak(text, this.spokenRate, language);
     this.playingUntil = Math.max(this.playingUntil, Date.now());
   }
 
@@ -348,7 +365,7 @@ export class CallSession extends DurableObject<Env> {
     if (this.ended) return;
     this.handoffReason = reason;
     this.turnAbort?.abort();
-    this.say("상담원에게 연결해 드릴게요.");
+    this.say(PHRASES[this.session.language].handoff);
     void this.afterPlayback(async () => {
       await this.transport.transfer(HANDOFF_TARGET);
       await this.finish("handoff");
@@ -362,8 +379,9 @@ export class CallSession extends DurableObject<Env> {
     this.handoffReason = `fail_safe: ${reason}`;
     this.turnAbort?.abort();
     // The sim falls back to a local voice for this text when TTS itself is the broken piece.
-    this.transport.sendEvent({ type: "fail_safe", text: FAIL_SAFE });
-    this.record("agent", FAIL_SAFE);
+    const text = PHRASES[this.session.language].failSafe;
+    this.transport.sendEvent({ type: "fail_safe", text });
+    this.record("agent", text);
     void this.transport.transfer(HANDOFF_TARGET).then(() => this.finish("fail_safe"));
   }
 

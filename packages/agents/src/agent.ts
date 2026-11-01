@@ -9,6 +9,7 @@ const MAX_MAIN_STEPS = 4;
 const MAX_SUB_STEPS = 8;
 const LLM_TIMEOUT_MS = 15_000;
 const FILLER = "네, 확인해 볼게요.";
+const FILLER_EN = "One moment, please.";
 
 const CONVERSATION_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
@@ -66,6 +67,7 @@ function stateNote(ctx: OrderToolContext): string {
   return `[시스템 상태] ${JSON.stringify({
     customer: ctx.customer && { name: ctx.customer.name, default_address: ctx.customer.default_address, dietary_notes: ctx.customer.dietary_notes },
     registered: Boolean(ctx.customer),
+    language: ctx.session.language,
     cart: ctx.session.cart,
     confirmation: ctx.session.status,
     placed_order: ctx.placedOrder,
@@ -145,7 +147,6 @@ export async function runConversationTurn(
     );
 
     let text = "";
-    let buffer = "";
     let first = true;
     const calls: { id: string; name: string; arguments: string }[] = [];
     for await (const chunk of stream) {
@@ -158,9 +159,6 @@ export async function runConversationTurn(
       }
       if (delta.content) {
         text += delta.content;
-        const { sentences, rest } = takeSentences(buffer + delta.content);
-        buffer = rest;
-        sentences.forEach(say);
       }
       for (const call of delta.tool_calls ?? []) {
         const slot = (calls[call.index] ??= { id: "", name: "", arguments: "" });
@@ -169,17 +167,19 @@ export async function runConversationTurn(
         slot.arguments += call.function?.arguments ?? "";
       }
     }
-    if (buffer.trim()) say(buffer);
 
     if (!calls.length) {
+      const { sentences, rest } = takeSentences(text);
+      [...sentences, rest].forEach(say);
       messages.push({ role: "assistant", content: text });
       return null;
     }
 
-    if (!spokeThisTurn) say(FILLER);
+    if (!spokeThisTurn) say(ctx.session.language === "en" ? FILLER_EN : FILLER);
+    // Text ahead of a tool call is the model narrating its plan, so the caller hears the filler instead.
     messages.push({
       role: "assistant",
-      content: text || null,
+      content: null,
       tool_calls: calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } })),
     });
 

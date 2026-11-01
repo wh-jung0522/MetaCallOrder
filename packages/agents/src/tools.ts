@@ -63,11 +63,11 @@ export async function executeOrderTool(name: string, args: Record<string, any>, 
       const customer = requireCustomer(ctx);
       if (customer.lat == null || customer.lng == null) throw new Error("고객 주소의 좌표가 없습니다");
       const stores = await ctx.adapter.searchStores({ lat: customer.lat, lng: customer.lng, query: args.query });
-      return stores.map(({ id, name, min_order_amount, delivery_fee, eta_minutes }) => ({ id, name, min_order_amount, delivery_fee, eta_minutes }));
+      return stores.map(({ id, name, name_en, min_order_amount, delivery_fee, eta_minutes }) => ({ id, name, name_en, min_order_amount, delivery_fee, eta_minutes }));
     }
     case "search_menu": {
       const menu = rankMenu(await ctx.adapter.getMenu(args.store_id), args.query);
-      return menu.slice(0, 5).map(({ id, name, price, options }) => ({ id, name, price, options }));
+      return menu.slice(0, 5).map(({ id, name, name_en, price, options }) => ({ id, name, name_en, price, options }));
     }
     case "cart_add": {
       const menu = await ctx.adapter.getMenu(args.store_id);
@@ -94,7 +94,8 @@ export async function executeOrderTool(name: string, args: Record<string, any>, 
       assertWithinOrderLimit(customer, quote.total);
       const store = (await ctx.adapter.searchStores({ lat: customer.lat ?? 0, lng: customer.lng ?? 0 })).find((candidate) => candidate.id === cart.store_id);
       if (!store) throw new Error("가게가 지금 주문을 받지 않습니다");
-      const recap = buildRecap(store.name, cart, quote.total, customer.default_address);
+      const language = ctx.session.language;
+      const recap = buildRecap(language === "en" ? (store.name_en ?? store.name) : store.name, cart, quote.total, customer.default_address, language);
       const token = await ctx.session.issueConfirmation(recap);
       ctx.pendingRecap = recap;
       ctx.storeName = store.name;

@@ -1,3 +1,4 @@
+import type { Language } from "@callorder/agents";
 import { connectWebSocket } from "./upstream";
 
 export const TTS_SAMPLE_RATE = 24000;
@@ -11,7 +12,7 @@ export interface TtsHandlers {
 
 export interface Tts {
   readonly busy: boolean;
-  speak(text: string, speed: number): void;
+  speak(text: string, speed: number, language: Language): void;
   cancel(): void;
   drained(): Promise<void>;
   close(): void;
@@ -24,7 +25,7 @@ function decodeBase64(data: string): Uint8Array {
 // Soniox runs concurrent streams side by side, so sentences go one at a time to keep the audio in order.
 export class SonioxTts implements Tts {
   private socket!: WebSocket;
-  private queue: { text: string; speed: number }[] = [];
+  private queue: { text: string; speed: number; language: Language }[] = [];
   private activeStream: string | null = null;
   private cancelled = false;
   private carry: number | null = null;
@@ -48,8 +49,8 @@ export class SonioxTts implements Tts {
     return this.activeStream !== null || this.queue.length > 0;
   }
 
-  speak(text: string, speed: number): void {
-    this.queue.push({ text, speed });
+  speak(text: string, speed: number, language: Language): void {
+    this.queue.push({ text, speed, language });
     this.pump();
   }
 
@@ -90,7 +91,7 @@ export class SonioxTts implements Tts {
     this.send({
       stream_id: this.activeStream,
       model: this.options.model,
-      language: "ko",
+      language: next.language,
       voice: this.options.voice,
       audio_format: "pcm_s16le",
       sample_rate: TTS_SAMPLE_RATE,

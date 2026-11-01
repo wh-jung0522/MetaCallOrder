@@ -1,11 +1,20 @@
-const compact = (text: string) => text.replace(/[\s.,!?~…]/g, "");
+export type Language = "ko" | "en";
 
-const AFFIRMATIVE = /^(네|예|응|그래|맞아|맞아요|맞습니다|맞네|맞다|그래요|그럼요|좋아|좋아요|부탁해요|주문해|주문해요|주문해줘|주문해주세요|보내줘|보내주세요|해줘|해주세요|그렇게해주세요|그렇게해줘)+$/;
+const compact = (text: string) => text.toLowerCase().replace(/[\s.,!?~…'’]/g, "");
+
+// One stray English word ("오케이" heard as "okay") must not flip a Korean call; any Hangul flips back at once.
+export function nextLanguage(text: string, current: Language): Language {
+  if (/[가-힣]/.test(text)) return "ko";
+  return (text.match(/[a-z]+/gi)?.length ?? 0) >= 2 ? "en" : current;
+}
+
+const AFFIRMATIVE = /^(네|예|응|그래|맞아|맞아요|맞습니다|맞네|맞다|그래요|그럼요|좋아|좋아요|부탁해요|주문해|주문해요|주문해줘|주문해주세요|보내줘|보내주세요|해줘|해주세요|그렇게해주세요|그렇게해줘|yes|yeah|yep|yup|correct|right|sure|ok|okay|please|goahead|thatsright|thatscorrect|soundsgood|confirm|placeit|placetheorder|sendit)+$/;
 const NEGATIVE = /아니|아뇨|안돼|안되|안해|하지마|말고|틀려|틀렸|다르|취소|잠깐|잠시|바꿔|빼/;
-const FILLER = /^(음+|어+|아+|으+|네+|예+|응+|그+|저+|에+)+$/;
+const NEGATIVE_EN = /\b(no|nope|not|don'?t|wrong|cancel|wait|hold on|change|remove|stop)\b/i;
+const FILLER = /^(음+|어+|아+|으+|네+|예+|응+|그+|저+|에+|u+m+|u+h+|h?m+|a+h+|o+h+|yes|yeah|yep|ok|okay|right|sure)+$/;
 
 export function isNegative(text: string): boolean {
-  return NEGATIVE.test(compact(text));
+  return NEGATIVE.test(compact(text)) || NEGATIVE_EN.test(text);
 }
 
 // Anchored on purpose: "네 근데 하나 더요" must not place an order.
@@ -15,11 +24,11 @@ export function isAffirmative(text: string): boolean {
 }
 
 export function isRepeatRequest(text: string): boolean {
-  return /(다시|한번더).*(말|얘기|해주|들려)|뭐라고|안들려|못들었/.test(compact(text));
+  return /(다시|한번더).*(말|얘기|해주|들려)|뭐라고|안들려|못들었/.test(compact(text)) || /\b(repeat|say (that|it) again|come again|pardon|what did you say|didn'?t (hear|catch))\b/i.test(text);
 }
 
 export function isHandoffRequest(text: string): boolean {
-  return /상담원|상담사|사람바꿔|사람연결|사람이랑|직원바꿔/.test(compact(text));
+  return /상담원|상담사|사람바꿔|사람연결|사람이랑|직원바꿔/.test(compact(text)) || /\b(agent|operator|representative|human|real person|customer service)\b/i.test(text);
 }
 
 // Backchannel sounds ("음", "네") must not cut the agent off mid-sentence.

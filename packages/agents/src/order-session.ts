@@ -1,5 +1,5 @@
 import type { Cart, CartItem, MenuItem } from "@callorder/adapters";
-import { countToKorean, isAffirmative, isNegative, wonToKorean } from "./text";
+import { countToKorean, isAffirmative, isNegative, wonToKorean, type Language } from "./text";
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -13,7 +13,11 @@ export function cartHash(cart: Cart): Promise<string> {
   return sha256(JSON.stringify([cart.store_id, lines]));
 }
 
-export function buildRecap(storeName: string, cart: Cart, total: number, address: string): string {
+export function buildRecap(storeName: string, cart: Cart, total: number, address: string, language: Language = "ko"): string {
+  if (language === "en") {
+    const lines = cart.items.map((line) => `${line.quantity} ${line.label_en ?? line.name}`);
+    return `From ${storeName}, ${lines.join(", ")}, ${total.toLocaleString("en-US")} won including delivery, to ${address}. Shall I place this order? Please say yes to confirm.`;
+  }
   const lines = cart.items.map((line) => {
     const options = Object.values(line.options).join(" ");
     return `${options ? `${options} ` : ""}${line.name} ${countToKorean(line.quantity)} 개`;
@@ -33,6 +37,7 @@ export type ConfirmationOutcome = "confirmed" | "rejected" | "none";
 // Whether an order may be placed is decided here, by code, from what was said aloud. The LLM has no way in.
 export class OrderSession {
   cart: Cart | null = null;
+  language: Language = "ko";
   private confirmation: Confirmation | null = null;
   private lastSpoken: string | null = null;
 
@@ -46,7 +51,13 @@ export class OrderSession {
       if (chosen === undefined && option.required) throw new Error(`옵션을 먼저 여쭤보세요: ${option.name} (${option.choices.join(", ")})`);
       if (chosen !== undefined && !option.choices.includes(chosen)) throw new Error(`${option.name} 옵션은 ${option.choices.join(", ")} 중 하나여야 합니다`);
     }
-    const line: CartItem = { menu_item_id: item.id, name: item.name, quantity, unit_price: item.price, options };
+    const optionsEn = item.options.flatMap((option) => {
+      const chosen = options[option.name];
+      if (chosen === undefined) return [];
+      return [option.choices_en?.[option.choices.indexOf(chosen)] ?? chosen];
+    });
+    const label_en = [...optionsEn, item.name_en ?? item.name].join(" ");
+    const line: CartItem = { menu_item_id: item.id, name: item.name, label_en, quantity, unit_price: item.price, options };
     if (!this.cart || this.cart.store_id !== item.store_id) this.cart = { store_id: item.store_id, items: [] };
     const same = this.cart.items.find(
       (existing) => existing.menu_item_id === item.id && JSON.stringify(existing.options) === JSON.stringify(options),

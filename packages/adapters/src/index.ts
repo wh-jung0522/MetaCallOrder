@@ -25,6 +25,7 @@ export interface Guardian {
 export interface Store {
   id: string;
   name: string;
+  name_en?: string | null;
   phone_e164: string;
   address: string;
   lat: number | null;
@@ -40,6 +41,7 @@ export interface Store {
 export interface MenuOption {
   name: string;
   choices: string[];
+  choices_en?: string[];
   required: boolean;
 }
 
@@ -47,6 +49,7 @@ export interface MenuItem {
   id: string;
   store_id: string;
   name: string;
+  name_en?: string | null;
   aliases: string[];
   price: number;
   options: MenuOption[];
@@ -56,6 +59,7 @@ export interface MenuItem {
 export interface CartItem {
   menu_item_id: string;
   name: string;
+  label_en?: string;
   quantity: number;
   unit_price: number;
   options: Record<string, string>;
@@ -154,7 +158,7 @@ export class SupabaseMerchantAdapter implements MerchantAdapter {
     return (data as Store[])
       .map((store) => ({ store, km: distanceKm(lat, lng, store.lat ?? lat, store.lng ?? lng) }))
       .filter(({ km }) => km <= DELIVERY_RADIUS_KM)
-      .filter(({ store }) => !query || matchScore(query, store.name) >= 0.3)
+      .filter(({ store }) => !query || Math.max(matchScore(query, store.name), matchScore(query, store.name_en ?? "")) >= 0.3)
       .sort((a, b) => a.km - b.km)
       .map(({ store }) => store);
   }

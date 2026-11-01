@@ -1,8 +1,8 @@
 import type { Cart, Customer, CustomerRepository, MenuItem, MerchantAdapter, OrderResult, PlaceOrderContext, Store } from "@callorder/adapters";
 import { describe, expect, it } from "vitest";
 import { runConversationTurn, type ChatClient } from "./agent";
-import { OrderSession } from "./order-session";
-import { isAffirmative, isBargeIn, isNegative, isRepeatRequest, sanitizeForTts, takeSentences, wonToKorean } from "./text";
+import { buildRecap, OrderSession } from "./order-session";
+import { isAffirmative, isBargeIn, isHandoffRequest, isNegative, isRepeatRequest, nextLanguage, sanitizeForTts, takeSentences, wonToKorean } from "./text";
 import { executeOrderTool, type OrderToolContext } from "./tools";
 
 const customer: Customer = {
@@ -235,5 +235,37 @@ describe("conversation turn", () => {
     const client = fakeClient([[toolDelta("handoff", { reason: "요청" })]]);
     const action = await runConversationTurn([], ctx, { client, model: "m" }, hooks([]), new AbortController().signal);
     expect(action).toEqual({ type: "handoff", reason: "요청" });
+  });
+});
+
+describe("english calls", () => {
+  it("counts only a plain yes as confirmation", () => {
+    for (const yes of ["Yes.", "yes please", "That's right", "Okay", "go ahead"]) expect(isAffirmative(yes)).toBe(true);
+    for (const other of ["yes but add one more", "no", "not yet", "wait", "I know"]) expect(isAffirmative(other)).toBe(false);
+    expect(isNegative("I know")).toBe(false);
+    expect(isNegative("No, cancel it")).toBe(true);
+  });
+
+  it("recognizes barge-in, repeat and agent requests", () => {
+    expect(isBargeIn("um")).toBe(false);
+    expect(isBargeIn("yeah")).toBe(false);
+    expect(isBargeIn("actually make it two")).toBe(true);
+    expect(isRepeatRequest("Can you repeat that?")).toBe(true);
+    expect(isHandoffRequest("I want a real person")).toBe(true);
+  });
+
+  it("follows the caller's language without flipping on one stray word", () => {
+    expect(nextLanguage("okay", "ko")).toBe("ko");
+    expect(nextLanguage("two soups please", "ko")).toBe("en");
+    expect(nextLanguage("네", "en")).toBe("ko");
+    expect(nextLanguage("yes", "en")).toBe("en");
+  });
+
+  it("reads the recap in English using English names and option labels", () => {
+    const session = new OrderSession();
+    session.addItem({ ...gukbap, name_en: "sundae soup", options: [{ name: "맵기", choices: ["안 맵게", "보통"], choices_en: ["not spicy", "regular"], required: true }] }, 2, { 맵기: "안 맵게" });
+    const recap = buildRecap("Happy Soup House", session.cart!, 20000, "12 Haengbok-dong, Seoul", "en");
+    expect(recap).toBe("From Happy Soup House, 2 not spicy sundae soup, 20,000 won including delivery, to 12 Haengbok-dong, Seoul. Shall I place this order? Please say yes to confirm.");
+    expect(recap).not.toMatch(/[가-힣]/);
   });
 });
