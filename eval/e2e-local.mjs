@@ -63,14 +63,16 @@ function rest(req, res, body) {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(single ? rows[0] ?? null : rows));
   };
-  if (req.method === "GET") return reply(db[table].filter(matches));
+  // Embeds the store for selects like "stores(name, eta_minutes)".
+  const withStore = (row) => ((url.searchParams.get("select") ?? "").includes("stores(") ? { ...row, stores: db.stores.find((store) => store.id === row.store_id) ?? null } : row);
+  if (req.method === "GET") return reply(db[table].filter(matches).map(withStore));
   if (req.method === "POST") {
     const rows = [].concat(JSON.parse(body));
     const key = url.searchParams.get("on_conflict");
     const inserted = [];
     for (const row of rows) {
       if (key && db[table].some((existing) => existing[key] === row[key])) continue;
-      const stored = { id: crypto.randomUUID(), status: "pending", ...(table === "customers" ? { is_demo: false } : {}), ...row };
+      const stored = { id: crypto.randomUUID(), status: "pending", created_at: new Date().toISOString(), ...(table === "customers" ? { is_demo: false } : {}), ...row };
       db[table].push(stored);
       inserted.push(stored);
     }
@@ -336,6 +338,8 @@ try {
   await new Promise((resolve, reject) => { second.on("open", resolve); second.on("error", reject); });
   second.send(JSON.stringify({ type: "start", callerId: customer.phone_e164, lang: "ko" }));
   await until(() => silent.some((e) => e.type === "voice_off"), "voice off event");
+  // Calling back while the first order is still on its way: the call opens with how long is left.
+  await until(() => silent.some((e) => e.type === "assistant_text" && e.text.includes("주문하신 순대국밥") && e.text.includes("약 30분 뒤 도착합니다")), "order on its way announced");
   await until(() => stt, "second stt");
   await sleep(300);
   const repliesBefore = silent.filter((e) => e.type === "assistant_text").length;

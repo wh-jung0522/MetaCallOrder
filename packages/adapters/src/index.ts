@@ -297,6 +297,19 @@ export class SupabaseMerchantAdapter implements MerchantAdapter {
 
 export const FIRST_TIME_CALLER_NAME = "고객";
 
+export interface OrderOnTheWay {
+  item: CartItem;
+  status: OrderStatus;
+  minutesLeft: number;
+  storeName: string;
+  storeNameEn: string | null;
+}
+
+// Whole minutes until the store's delivery time is up, rounded up so "about 1 minute" lasts until it arrives.
+export function minutesUntilArrival(createdAt: string, etaMinutes: number, now: number): number {
+  return Math.ceil((new Date(createdAt).getTime() + etaMinutes * 60_000 - now) / 60_000);
+}
+
 export class CustomerRepository {
   constructor(private db: SupabaseClient) {}
 
@@ -343,6 +356,25 @@ export class CustomerRepository {
       .limit(limit);
     if (error) throw error;
     return data;
+  }
+
+  // The newest order still on its way: placed in the last three hours, not cancelled or turned down, and its store's delivery time not up yet.
+  // ponytail: there is no delivered status, so the store's eta stands in for it; add one if stores start marking deliveries.
+  async orderOnTheWay(customerId: string, now = Date.now()): Promise<OrderOnTheWay | null> {
+    const { data, error } = await this.db
+      .from("orders")
+      .select("items, status, created_at, stores(name, name_en, eta_minutes)")
+      .eq("customer_id", customerId)
+      .in("status", ["pending", "accepted"])
+      .gte("created_at", new Date(now - 3 * 3_600_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    const order = data[0] as unknown as { items: CartItem[]; status: OrderStatus; created_at: string; stores: { name: string; name_en: string | null; eta_minutes: number } | null } | undefined;
+    if (!order?.stores || !order.items.length) return null;
+    const minutesLeft = minutesUntilArrival(order.created_at, order.stores.eta_minutes, now);
+    if (!(minutesLeft > 0)) return null;
+    return { item: order.items[0]!, status: order.status, minutesLeft, storeName: order.stores.name, storeNameEn: order.stores.name_en };
   }
 
   // Rolling 24 hours, which avoids any timezone question about what "today" means.

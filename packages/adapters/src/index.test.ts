@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchScore, rankMenu, type MenuItem, SupabaseMerchantAdapter } from "./index";
+import { matchScore, minutesUntilArrival, rankMenu, type MenuItem, SupabaseMerchantAdapter } from "./index";
 
 const item = (name: string, aliases: string[] = []): MenuItem => ({
   id: name, store_id: "s", name, aliases, price: 1000, options: [], is_available: true,
@@ -47,5 +47,19 @@ describe("searchStores", () => {
   it("offers every nearby store when nothing matches", async () => {
     expect(await ids("초밥")).toEqual(["s1", "s2"]);
     expect(await ids()).toEqual(["s1", "s2"]);
+  });
+});
+
+describe("minutesUntilArrival", () => {
+  const placed = "2026-11-04T12:00:00Z";
+  const at = (time: string) => new Date(time).getTime();
+  it("counts down from the store's delivery time and rounds up", () => {
+    expect(minutesUntilArrival(placed, 35, at("2026-11-04T12:00:00Z"))).toBe(35);
+    expect(minutesUntilArrival(placed, 35, at("2026-11-04T12:20:30Z"))).toBe(15);
+    expect(minutesUntilArrival(placed, 35, at("2026-11-04T12:34:59Z"))).toBe(1);
+  });
+  it("reaches zero once the delivery time is up", () => {
+    expect(minutesUntilArrival(placed, 35, at("2026-11-04T12:35:00Z"))).toBe(0);
+    expect(minutesUntilArrival(placed, 35, at("2026-11-04T13:10:00Z"))).toBeLessThan(0);
   });
 });

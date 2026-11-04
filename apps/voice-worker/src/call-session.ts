@@ -16,11 +16,12 @@ const RECORDED: Record<string, ArrayBuffer> = {
   "ko-greeting": koGreeting, "en-greeting": enGreeting,
 };
 
-const PHRASES: Record<Language, { greeting: string; askAddress: string; demoAddress(address: string): string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
+const PHRASES: Record<Language, { greeting: string; askAddress: string; demoAddress(address: string): string; onTheWay(item: string, minutes: number, accepted: boolean): string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
     greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
     askAddress: "처음 전화 주셨네요. 배달 받으실 주소를 말씀해 주세요.",
     demoAddress: (address) => `감사합니다. 지금은 시연 중이라 배달 주소는 ${address}로 정해집니다. 무엇을 주문해 드릴까요?`,
+    onTheWay: (item, minutes, accepted) => `주문하신 ${item}, 가게에서 ${accepted ? "준비하고" : "확인하고"} 있습니다. 약 ${minutes}분 뒤 도착합니다. 더 필요하신 게 있으세요?`,
     whatToOrder: "무엇을 주문해 드릴까요?",
     reorder: (item) => `지난번에 ${item} 드셨어요. 같은 걸로 하실까요?`,
     silence: "천천히 말씀하셔도 됩니다.",
@@ -33,6 +34,7 @@ const PHRASES: Record<Language, { greeting: string; askAddress: string; demoAddr
     greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
     askAddress: "This is your first call. Please tell me your delivery address.",
     demoAddress: () => "Thank you. This is a demo, so orders go to our demo address for now. What would you like to order?",
+    onTheWay: (item, minutes, accepted) => `Your ${item} is ${accepted ? "being prepared" : "with the store for confirmation"}. It should arrive in about ${minutes} minutes. Is there anything else you need?`,
     whatToOrder: "What would you like to order?",
     reorder: (item) => `Last time you had ${item}. Would you like the same?`,
     silence: "Please take your time.",
@@ -290,6 +292,16 @@ export class CallSession extends DurableObject<Env> {
       this.awaitingAddress = true;
       this.messages.push({ role: "assistant", content: PHRASES[language].askAddress });
       this.say(PHRASES[language].askAddress);
+      this.armSilenceTimer();
+      return;
+    }
+    // An order still on its way comes first: that is most likely why they called back.
+    const onTheWay = await customers.orderOnTheWay(this.customer.id).catch(() => null);
+    if (onTheWay) {
+      const item = language === "en" ? (onTheWay.item.label_en ?? onTheWay.item.name) : onTheWay.item.name;
+      const status = PHRASES[language].onTheWay(item, onTheWay.minutesLeft, onTheWay.status === "accepted");
+      this.messages.push({ role: "assistant", content: status });
+      this.say(status);
       this.armSilenceTimer();
       return;
     }
