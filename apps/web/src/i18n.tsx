@@ -9,11 +9,10 @@ const STORAGE_KEY = "lang";
 
 function initialLang(): Lang {
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === "ko" || saved === "en") return saved;
-  return navigator.language.startsWith("ko") ? "ko" : "en";
+  return saved === "ko" ? "ko" : "en";
 }
 
-const LangContext = createContext<{ lang: Lang; setLang: (lang: Lang) => void }>({ lang: "ko", setLang: () => {} });
+const LangContext = createContext<{ lang: Lang; setLang: (lang: Lang) => void }>({ lang: "en", setLang: () => {} });
 
 export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLang] = useState(initialLang);

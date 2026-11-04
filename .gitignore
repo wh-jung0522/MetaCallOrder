@@ -224,3 +224,7 @@ __marimo__/
 .dev.vars*
 .env.local
 node_modules/
+
+# Claude Code
+.claude/
+CLAUDE.md
