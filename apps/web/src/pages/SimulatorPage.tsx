@@ -1,5 +1,5 @@
 import { BatteryFull, Delete, Grid3x3, Mic, MicOff, Phone, PhoneOff, SignalHigh, Wifi } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -20,6 +20,7 @@ import { won } from "../orders";
 
 const WS_URL = import.meta.env.VITE_VOICE_WS_URL as string;
 const HTTP_URL = WS_URL.replace(/^ws/, "http").replace(/\/sim\/stream$/, "");
+const WATCH_URL = WS_URL.replace(/\/sim\/stream$/, "/sim/watch");
 const UNREGISTERED = "+821099999999";
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 const KEY_LETTERS: Record<string, string> = { "2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ" };
@@ -418,6 +419,7 @@ export function SimulatorPage() {
             <p className="text-sm text-muted-foreground">{t("누구나 전화해서 주문할 수 있습니다. 배달지는 시연용 주소로 들어갑니다.", "Anyone can call and order. Orders go to a demo address.")}</p>
           </CardContent>
         </Card>
+        <LiveCalls code={code} />
       </div>
     );
   }
@@ -523,52 +525,13 @@ export function SimulatorPage() {
               </EmptyHeader>
             </Empty>
           ) : (
-            <MessageScrollerProvider autoScroll>
-              <MessageScroller className="min-h-0 flex-1">
-                <MessageScrollerViewport>
-                  <MessageScrollerContent className="gap-4 p-4">
-                    {timeline.map((entry, index) => (
-                      <MessageScrollerItem key={index} messageId={String(index)} className="overflow-visible px-px">
-                        {entry.kind === "note" && <Marker><MarkerContent>{t(...entry.text)}</MarkerContent></Marker>}
-                        {entry.kind === "order" && (
-                          <Card size="sm" className="mx-auto my-1 w-full max-w-xs">
-                            <CardHeader>
-                              <CardTitle>{t("주문이 접수됐습니다", "Your order is placed")}</CardTitle>
-                              <CardDescription>{entry.storeName}, {won(entry.total, t)}, {t(`약 ${entry.eta}분 뒤 도착`, `arriving in about ${entry.eta} minutes`)}</CardDescription>
-                            </CardHeader>
-                          </Card>
-                        )}
-                        {entry.kind === "line" && (
-                          <Message align={entry.who === "caller" ? "end" : "start"}>
-                            <MessageContent>
-                              {(timeline[index - 1] as { who?: string } | undefined)?.who !== entry.who && <MessageHeader>{entry.who === "caller" ? callerName ?? t("고객", "Customer") : t("콜오더", "CallOrder")}</MessageHeader>}
-                              <Bubble variant={entry.who === "caller" ? "default" : "muted"} align={entry.who === "caller" ? "end" : "start"}>
-                                <BubbleContent className="text-lg">{entry.text}</BubbleContent>
-                              </Bubble>
-                            </MessageContent>
-                          </Message>
-                        )}
-                      </MessageScrollerItem>
-                    ))}
-                    {partial && (
-                      <MessageScrollerItem messageId="partial">
-                        <Message align="end">
-                          <MessageContent>
-                            <Bubble variant="outline" align="end"><BubbleContent className="text-lg text-muted-foreground">{partial}</BubbleContent></Bubble>
-                          </MessageContent>
-                        </Message>
-                      </MessageScrollerItem>
-                    )}
-                    {sms.map((message, index) => (
-                      <MessageScrollerItem key={`sms-${index}`} messageId={`sms-${index}`}>
-                        <Marker><MarkerContent>{t(`${formatPhone(message.to)} 보호자에게 문자를 보냈습니다: `, `Sent a text to the guardian at ${formatPhone(message.to)}: `)}{message.text}</MarkerContent></Marker>
-                      </MessageScrollerItem>
-                    ))}
-                  </MessageScrollerContent>
-                </MessageScrollerViewport>
-                <MessageScrollerButton />
-              </MessageScroller>
-            </MessageScrollerProvider>
+            <Transcript timeline={timeline} partial={partial} callerLabel={callerName ?? t("고객", "Customer")}>
+              {sms.map((message, index) => (
+                <MessageScrollerItem key={`sms-${index}`} messageId={`sms-${index}`}>
+                  <Marker><MarkerContent>{t(`${formatPhone(message.to)} 보호자에게 문자를 보냈습니다: `, `Sent a text to the guardian at ${formatPhone(message.to)}: `)}{message.text}</MarkerContent></Marker>
+                </MessageScrollerItem>
+              ))}
+            </Transcript>
           )}
         </section>
 
@@ -627,6 +590,142 @@ export function SimulatorPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function Transcript({ timeline, partial, callerLabel, children }: { timeline: TimelineEntry[]; partial: string; callerLabel: string; children?: ReactNode }) {
+  const { t } = useT();
+  return (
+    <MessageScrollerProvider autoScroll>
+      <MessageScroller className="min-h-0 flex-1">
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="gap-4 p-4">
+            {timeline.map((entry, index) => (
+              <MessageScrollerItem key={index} messageId={String(index)} className="overflow-visible px-px">
+                {entry.kind === "note" && <Marker><MarkerContent>{t(...entry.text)}</MarkerContent></Marker>}
+                {entry.kind === "order" && (
+                  <Card size="sm" className="mx-auto my-1 w-full max-w-xs">
+                    <CardHeader>
+                      <CardTitle>{t("주문이 접수됐습니다", "Your order is placed")}</CardTitle>
+                      <CardDescription>{entry.storeName}, {won(entry.total, t)}, {t(`약 ${entry.eta}분 뒤 도착`, `arriving in about ${entry.eta} minutes`)}</CardDescription>
+                    </CardHeader>
+                  </Card>
+                )}
+                {entry.kind === "line" && (
+                  <Message align={entry.who === "caller" ? "end" : "start"}>
+                    <MessageContent>
+                      {(timeline[index - 1] as { who?: string } | undefined)?.who !== entry.who && <MessageHeader>{entry.who === "caller" ? callerLabel : t("콜오더", "CallOrder")}</MessageHeader>}
+                      <Bubble variant={entry.who === "caller" ? "default" : "muted"} align={entry.who === "caller" ? "end" : "start"}>
+                        <BubbleContent className="text-lg">{entry.text}</BubbleContent>
+                      </Bubble>
+                    </MessageContent>
+                  </Message>
+                )}
+              </MessageScrollerItem>
+            ))}
+            {partial && (
+              <MessageScrollerItem messageId="partial">
+                <Message align="end">
+                  <MessageContent>
+                    <Bubble variant="outline" align="end"><BubbleContent className="text-lg text-muted-foreground">{partial}</BubbleContent></Bubble>
+                  </MessageContent>
+                </Message>
+              </MessageScrollerItem>
+            )}
+            {children}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+}
+
+interface LiveCall { callId: string; caller: string; timeline: TimelineEntry[]; partial: string; ended: boolean }
+
+// The same events the simulator screen gets, for one real call.
+function applyLiveEvent(call: LiveCall, message: Record<string, any>): LiveCall {
+  const at = Date.now();
+  switch (message.type) {
+    case "transcript":
+      return message.final ? { ...call, partial: "", timeline: [...call.timeline, { kind: "line", who: "caller", text: message.text, at }] } : { ...call, partial: message.text };
+    case "assistant_text":
+    case "fail_safe":
+      return { ...call, timeline: [...call.timeline, { kind: "line", who: "agent", text: message.text, at }] };
+    case "order_placed":
+      return { ...call, timeline: [...call.timeline, { kind: "order", storeName: message.storeName, total: message.order.total, eta: message.order.eta_minutes, at }] };
+    case "hangup":
+      return { ...call, partial: "", ended: true };
+    default:
+      return call;
+  }
+}
+
+const MAX_LIVE_CALLS = 6;
+
+// Real calls from the numbers given, live. Each call gets its own panel, so calls at the same time sit side by side.
+function LiveCalls({ code }: { code: string }) {
+  const { t } = useT();
+  const [typed, setTyped] = useState(() => localStorage.getItem("watch-numbers") ?? localStorage.getItem("sim-my-number") ?? "");
+  const [watching, setWatching] = useState<string[]>([]);
+  const [calls, setCalls] = useState<LiveCall[]>([]);
+
+  useEffect(() => {
+    let stopped = false;
+    const sockets: WebSocket[] = [];
+    const open = (phone: string) => {
+      const ws = new WebSocket(`${WATCH_URL}?phone=${encodeURIComponent(phone)}&code=${encodeURIComponent(code)}`);
+      sockets.push(ws);
+      ws.onmessage = ({ data }) => {
+        const message = JSON.parse(data);
+        if (!message.callId) return;
+        setCalls((all) => {
+          const found = all.find((call) => call.callId === message.callId);
+          const next = applyLiveEvent(found ?? { callId: message.callId, caller: phone, timeline: [], partial: "", ended: false }, message);
+          return found ? all.map((call) => (call === found ? next : call)) : [next, ...all].slice(0, MAX_LIVE_CALLS);
+        });
+      };
+      // ponytail: fixed 3 s retry; back off if the Worker ever has to turn screens away
+      ws.onclose = () => { if (!stopped) setTimeout(() => !stopped && open(phone), 3000); };
+    };
+    watching.forEach(open);
+    return () => {
+      stopped = true;
+      sockets.forEach((ws) => ws.close());
+    };
+  }, [watching, code]);
+
+  const watch = (event: FormEvent) => {
+    event.preventDefault();
+    const numbers = [...new Set(typed.split(/[,\n]/).map(toE164).filter((number): number is string => Boolean(number)))];
+    localStorage.setItem("watch-numbers", typed);
+    setWatching(numbers);
+  };
+
+  return (
+    <section aria-label={t("실시간 통화", "Live calls")} className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+      <form className="mx-auto flex w-full max-w-sm flex-col gap-2" onSubmit={watch}>
+        <label htmlFor="watch-numbers" className="text-sm font-medium">{t("거는 휴대폰 번호 (여러 개는 쉼표로)", "Phone numbers you call from (separate with commas)")}</label>
+        <div className="flex gap-2">
+          <Input id="watch-numbers" type="tel" autoComplete="tel" placeholder={t("010-0000-0000", "+1 000 000 0000")} value={typed} onChange={(event) => setTyped(event.target.value)} />
+          <Button type="submit" variant="secondary">{t("통화 보기", "Show calls")}</Button>
+        </div>
+        {watching.length > 0 && <p className="text-sm text-muted-foreground">{t("이 번호로 걸면 대화가 아래에 실시간으로 나옵니다: ", "Calls from these numbers appear below as they happen: ")}{watching.map(formatPhone).join(", ")}</p>}
+      </form>
+      {calls.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {calls.map((call) => (
+            <div key={call.callId} className="flex h-[min(60svh,640px)] min-h-72 flex-col rounded-xl border bg-background">
+              <div className="flex items-center justify-between border-b px-4 py-2 text-sm">
+                <span className="font-medium">{formatPhone(call.caller)}</span>
+                <Badge variant={call.ended ? "secondary" : "default"}>{call.ended ? t("통화 종료", "Ended") : t("통화 중", "On call")}</Badge>
+              </div>
+              <Transcript timeline={call.timeline} partial={call.partial} callerLabel={t("고객", "Customer")} />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { CallSession } from "./call-session";
 
 const DB_TIMEOUT_MS = 8000;
 
@@ -10,7 +11,7 @@ export function createDb(env: Env, timeoutMs = DB_TIMEOUT_MS) {
 }
 
 export interface Env {
-  CALL_SESSION: DurableObjectNamespace;
+  CALL_SESSION: DurableObjectNamespace<CallSession>;
   META_API_KEY: string;
   META_LLM_MODEL: string;
   META_STT_MODEL: string;

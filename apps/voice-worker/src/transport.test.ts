@@ -70,4 +70,14 @@ describe("PhoneTransport", () => {
     expect(digits).toEqual(["1"]);
     expect(hangup).toHaveBeenCalled();
   });
+
+  it("hands screen events to the watcher, not the phone line, and tells it when the call ends", () => {
+    const socket = fakeSocket();
+    const watched: Record<string, unknown>[] = [];
+    const transport = new PhoneTransport(socket as unknown as WebSocket, "+821000000001", undefined, (event) => void watched.push(event));
+    transport.sendEvent({ type: "assistant_text", text: "무엇을 주문해 드릴까요?" });
+    socket.emit("close");
+    expect(watched).toEqual([{ type: "assistant_text", text: "무엇을 주문해 드릴까요?" }, { type: "hangup" }]);
+    expect(socket.sent).toEqual([]);
+  });
 });

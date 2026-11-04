@@ -122,6 +122,14 @@ export default {
       return Response.json(await new CustomerRepository(createDb(env)).listDemo(), { headers: corsHeaders(origin!) });
     }
 
+    // ponytail: the access code is the only gate, so anyone holding it who knows a number can read that number's live calls. Tie watching to a login if the code leaves the team.
+    if (url.pathname === "/sim/watch") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("expected websocket", { status: 426 });
+      const phone = url.searchParams.get("phone") ?? "";
+      if (!CALLER_ID.test(phone)) return new Response("invalid phone", { status: 400 });
+      return env.CALL_SESSION.getByName(`watch:${phone}`).fetch(request);
+    }
+
     if (url.pathname === "/sim/stream") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("expected websocket", { status: 426 });
       const callId = url.searchParams.get("callId") ?? "";

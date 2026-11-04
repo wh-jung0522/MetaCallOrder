@@ -366,6 +366,29 @@ try {
   await callIn(customer.phone_e164);
   assert.equal(db.customers.find((row) => row.id === "c1").name, "김순자", "an existing customer is left alone");
 
+  // A screen watching a number sees that number's real calls, and only those, even when two calls run at once.
+  const watchers = await Promise.all(["+821055550001", customer.phone_e164].map(async (number) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}/sim/watch?phone=${encodeURIComponent(number)}&code=code`, { headers: { origin: ORIGIN } });
+    const events = [];
+    socket.on("message", (data) => events.push(JSON.parse(data.toString())));
+    await new Promise((resolve, reject) => { socket.on("open", resolve); socket.on("error", reject); });
+    return { socket, events };
+  }));
+  const lines = await Promise.all(["010-5555-0001", customer.phone_e164].map(async (from) => {
+    const line = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}${await callIn(from)}`);
+    await new Promise((resolve, reject) => { line.on("open", resolve); line.on("error", reject); });
+    line.send(JSON.stringify({ event: "start" }));
+    return line;
+  }));
+  await until(() => watchers.every(({ events }) => events.some((event) => event.type === "start_ack")), "both screens see their call start");
+  lines.forEach((line) => line.send(JSON.stringify({ event: "stop" })));
+  await until(() => watchers.every(({ events }) => events.some((event) => event.type === "hangup")), "both screens see their call end");
+  const [firstCalls, secondCalls] = watchers.map(({ events }) => new Set(events.map((event) => event.callId)));
+  assert.equal(firstCalls.size, 1, "one call per screen");
+  assert.equal(secondCalls.size, 1, "one call per screen");
+  assert.notDeepEqual([...firstCalls], [...secondCalls], "calls at the same time stay apart");
+  watchers.forEach(({ socket }) => socket.terminate());
+
   const count = db.customers.length;
   const path = await callIn("anonymous");
   assert.equal(db.customers.length, count);

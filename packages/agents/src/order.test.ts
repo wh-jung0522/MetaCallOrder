@@ -157,10 +157,10 @@ describe("place_order confirmation gate", () => {
 });
 
 describe("speech rules", () => {
-  it.each(["네", "네네", "예.", "응", "맞아요", "네 맞아요", "그렇게 해주세요"])("%s confirms", (text) => {
+  it.each(["네", "네네", "예.", "응", "맞아요", "네 맞아요", "그렇게 해주세요", "응 해줘", "넵", "어, 그래", "좋아요", "그걸로 해 주세요", "네 주문해 주세요", "주문할게요", "그대로요", "응응 보내줘", "알겠습니다", "네, 부탁드려요", "그럼요"])("%s confirms", (text) => {
     expect(isAffirmative(text)).toBe(true);
   });
-  it.each(["네 근데 하나 더요", "아니요", "네 아니요", "어", "음", "잠깐만요", "네 취소요"])("%s does not confirm", (text) => {
+  it.each(["네 근데 하나 더요", "아니요", "네 아니요", "어", "음", "잠깐만요", "네 취소요", "그래서요", "해물 짬뽕으로 해줘", "응 그거 빼줘", "좋아요 근데 하나 더", "그렇게 말고요"])("%s does not confirm", (text) => {
     expect(isAffirmative(text)).toBe(false);
   });
   it("detects negatives and repeat requests", () => {

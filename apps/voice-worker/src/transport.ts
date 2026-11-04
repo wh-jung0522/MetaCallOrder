@@ -11,7 +11,7 @@ export interface TelephonyTransport {
   clearPlayback(): void;
   transfer(target: string): Promise<void>;
   hangup(): void;
-  // Debug and demo events for the simulator screen. A phone call has no screen to show them on.
+  // Debug and demo events for the simulator screen. A phone call hands them to whoever watches its number.
   sendEvent(event: Record<string, unknown>): void;
 }
 
@@ -83,7 +83,7 @@ export class PhoneTransport implements TelephonyTransport {
   private pacer = 0;
 
   // Twilio requires the stream id on everything sent to it; ClawOps needs nothing extra.
-  constructor(private socket: WebSocket, readonly callerId: string, private streamSid?: string) {
+  constructor(private socket: WebSocket, readonly callerId: string, private streamSid?: string, private onEvent: (event: Record<string, unknown>) => void = () => {}) {
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return;
       const message = JSON.parse(event.data) as { event?: string; media?: { payload?: string }; dtmf?: { digit?: string } };
@@ -96,6 +96,7 @@ export class PhoneTransport implements TelephonyTransport {
     });
     socket.addEventListener("close", () => {
       clearInterval(this.pacer);
+      this.onEvent({ type: "hangup" });
       this.hangupCb();
     });
     this.pacer = setInterval(() => this.sendDueFrames(), PHONE_FRAME_MS);
@@ -151,5 +152,5 @@ export class PhoneTransport implements TelephonyTransport {
     };
     closeWhenPlayed();
   }
-  sendEvent() {}
+  sendEvent(event: Record<string, unknown>) { this.onEvent(event); }
 }

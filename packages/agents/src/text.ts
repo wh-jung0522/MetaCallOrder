@@ -9,7 +9,18 @@ export function nextLanguage(text: string, current: Language): Language {
   return words.some((word) => !/^(ok|okay|yes|no)$/.test(word)) ? "en" : current;
 }
 
-const AFFIRMATIVE = /^(네|예|응|그래|맞아|맞아요|맞습니다|맞네|맞다|그래요|그럼요|좋아|좋아요|부탁해요|주문해|주문해요|주문해줘|주문해주세요|보내줘|보내주세요|해줘|해주세요|그렇게해주세요|그렇게해줘|yes|yeah|yep|yup|correct|right|sure|ok|okay|please|goahead|thatsright|thatscorrect|soundsgood|confirm|placeit|placetheorder|sendit)+$/;
+// "그걸로 해줘", "주문해 주세요", "그대로요": every way of saying go ahead with what was read back.
+const GO_AHEAD = ["해", "보내", "주문해", "배달해", "부탁해", "그렇게", "그렇게해", "그걸로", "그걸로해", "그대로", "그대로해", "이대로", "이대로해"]
+  .flatMap((stem) => [stem, `${stem}요`, `${stem}줘`, `${stem}줘요`, `${stem}주세요`]);
+const YES_WORDS = [
+  "네", "넵", "넹", "예", "응", "웅", "그래", "그래요", "그러자", "그러세요", "그럼", "그럼요", "그렇지", "그렇죠", "그렇습니다", "당연하지", "당연하죠",
+  "맞아", "맞어", "맞아요", "맞습니다", "맞죠", "맞지", "맞네", "맞네요", "맞다", "맞고요", "좋아", "좋아요", "좋습니다", "좋지", "좋죠", "좋네요",
+  "오케이", "알겠어", "알겠어요", "알겠습니다", "알았어", "알았어요", "주세요", "주문할게", "주문할게요", "주문합니다", "그걸로할게요", "부탁합니다", "부탁드려요", "부탁드립니다",
+  ...GO_AHEAD,
+  "yes", "yeah", "yep", "yup", "correct", "right", "sure", "ok", "okay", "please", "goahead", "thatsright", "thatscorrect", "soundsgood", "confirm", "placeit", "placetheorder", "sendit",
+];
+// Longest first, so "그래요" is not read as "그래" plus a stray "요". A leading "어" or "음" is just a breath.
+const AFFIRMATIVE = new RegExp(`^(음|어|아|으)*(${[...YES_WORDS].sort((a, b) => b.length - a.length).join("|")})+$`);
 const NEGATIVE = /아니|아뇨|안돼|안되|안해|하지마|말고|틀려|틀렸|다르|취소|잠깐|잠시|바꿔|빼/;
 const NEGATIVE_EN = /\b(no|nope|not|don'?t|wrong|cancel|wait|hold on|change|remove|stop)\b/i;
 const FILLER = /^(음+|어+|아+|으+|네+|예+|응+|그+|저+|에+|u+m+|u+h+|h?m+|a+h+|o+h+|yes|yeah|yep|ok|okay|right|sure)+$/;

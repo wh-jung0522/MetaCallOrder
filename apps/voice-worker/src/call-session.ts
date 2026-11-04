@@ -110,10 +110,15 @@ export class CallSession extends DurableObject<Env> {
   override async fetch(request: Request): Promise<Response> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
+    const url = new URL(request.url);
+    // This instance is a number's watch room, not a call: screens join it and every call from that number reports here.
+    if (url.pathname === "/sim/watch") {
+      this.ctx.acceptWebSocket(server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     // Recent compatibility dates default to Blob, which reads as zero-length audio here.
     server.binaryType = "arraybuffer";
     server.accept();
-    const url = new URL(request.url);
     // A US number opens in English whoever is calling.
     const lang = url.searchParams.get("lang");
     this.dialedLanguage = lang === "en" || lang === "ko" ? lang : null;
@@ -127,13 +132,30 @@ export class CallSession extends DurableObject<Env> {
       const callerId = isPhone ? (url.searchParams.get("caller") ?? "") : start.callerId!;
       // The simulator speaks the screen's language, English unless told otherwise.
       if (!isPhone) this.dialedLanguage = start.lang === "ko" ? "ko" : "en";
-      this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId, start.start?.streamSid) : new SimulatorTransport(server, callerId)).catch((error) => {
+      this.begin(server, callerId, isPhone ? new PhoneTransport(server, callerId, start.start?.streamSid, callerId ? this.reportTo(callerId) : undefined) : new SimulatorTransport(server, callerId)).catch((error) => {
         console.error("call start failed", error);
         server.send(JSON.stringify({ type: "hangup", reason: "통화를 시작하지 못했습니다." }));
         server.close(1011, "start failed");
       });
     });
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // Calls to one stub arrive in order, so the screen sees the conversation as it happened. Each event names its call, so calls at the same time stay apart.
+  private reportTo(callerId: string): (event: Record<string, unknown>) => void {
+    const room = this.env.CALL_SESSION.getByName(`watch:${callerId}`);
+    return (event) => void room.publish({ ...event, callId: this.callId }).catch(() => {});
+  }
+
+  publish(event: Record<string, unknown>): void {
+    const data = JSON.stringify(event);
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.send(data);
+      } catch {
+        // A screen that left mid-send.
+      }
+    }
   }
 
   private async begin(socket: WebSocket, callerId: string, transport: PhoneTransport | SimulatorTransport): Promise<void> {
