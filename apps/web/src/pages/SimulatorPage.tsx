@@ -705,12 +705,12 @@ function LiveCalls({ code }: { code: string }) {
   return (
     <section aria-label={t("실시간 통화", "Live calls")} className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <form className="mx-auto flex w-full max-w-sm flex-col gap-2" onSubmit={watch}>
-        <label htmlFor="watch-numbers" className="text-sm font-medium">{t("거는 휴대폰 번호 (여러 개는 쉼표로)", "Phone numbers you call from (separate with commas)")}</label>
+        <label htmlFor="watch-numbers" className="text-sm font-medium">{t("화면에 띄울 통화의 발신 번호 (여러 개는 쉼표로)", "Show calls coming from these numbers (separate with commas)")}</label>
         <div className="flex gap-2">
           <Input id="watch-numbers" type="tel" autoComplete="tel" placeholder={t("010-0000-0000", "+1 000 000 0000")} value={typed} onChange={(event) => setTyped(event.target.value)} />
-          <Button type="submit" variant="secondary">{t("통화 보기", "Show calls")}</Button>
+          <Button type="submit" variant="secondary">{t("화면에 띄우기", "Show calls")}</Button>
         </div>
-        {watching.length > 0 && <p className="text-sm text-muted-foreground">{t("이 번호로 걸면 대화가 아래에 실시간으로 나옵니다: ", "Calls from these numbers appear below as they happen: ")}{watching.map(formatPhone).join(", ")}</p>}
+        {watching.length > 0 && <p className="text-sm text-muted-foreground">{t("여기서 전화가 걸리지는 않습니다. 이 휴대폰으로 위 번호에 걸면 대화가 아래에 실시간으로 나옵니다: ", "This page does not place the call. Call the number above from these phones and the conversation appears below: ")}{watching.map(formatPhone).join(", ")}</p>}
       </form>
       {calls.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2">
