@@ -1,7 +1,7 @@
 import enGreeting from "./greetings/en-greeting.pcm";
 import koGreeting from "./greetings/ko-greeting.pcm";
 import { CallRepository, CustomerRepository, FIRST_TIME_CALLER_NAME, SupabaseMerchantAdapter, type Customer, type OrderResult } from "@callorder/adapters";
-import { isBargeIn, isHandoffRequest, isRepeatRequest, nextLanguage, OrderSession, runConversationTurn, type Language, type OrderToolContext, type TurnAction } from "@callorder/agents";
+import { isBargeIn, isHandoffRequest, isRepeatRequest, judgeConfirmation, nextLanguage, OrderSession, runConversationTurn, type Language, type OrderToolContext, type TurnAction } from "@callorder/agents";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DurableObject } from "cloudflare:workers";
 import OpenAI from "openai";
@@ -358,9 +358,26 @@ export class CallSession extends DurableObject<Env> {
 
     if (this.awaitingAddress) return this.takeAddress(utterance);
 
-    this.applyConfirmation(this.session.noteCallerUtterance(utterance));
+    const outcome = this.session.noteCallerUtterance(utterance);
     this.messages.push({ role: "user", content: utterance });
+    if (outcome === "judge") return this.enqueueTurn(() => this.judgeAnswer(utterance));
+    this.applyConfirmation(outcome);
     this.enqueueTurn();
+  }
+
+  // Anything but a plain yes to the recap is weighed by a model that sees only the recap and the reply, in either language.
+  private async judgeAnswer(reply: string): Promise<void> {
+    const recap = this.session.awaitedRecap;
+    if (!recap) return;
+    const verdict = await judgeConfirmation(recap, reply, { client: this.llm.chat.completions, model: this.env.META_LLM_MODEL }, (usage) => {
+      this.usage.input += usage.prompt_tokens;
+      this.usage.output += usage.completion_tokens;
+    }).catch((error) => {
+      this.log("confirmation_judge_failed", { error: error instanceof Error ? error.message : String(error) });
+      return "unclear" as const;
+    });
+    this.log("confirmation_judged", { verdict });
+    this.applyConfirmation(this.session.answer(verdict));
   }
 
   // Whatever is said after the question is kept as the address. The order itself still goes to the demo address, and the caller is told so.
@@ -390,15 +407,18 @@ export class CallSession extends DurableObject<Env> {
     // Pressing a key mid-recap means they did not wait to hear it, same as speaking over it.
     if (this.isPlaying()) this.bargeIn();
     this.bargedIn = false;
-    this.applyConfirmation(this.session.noteCallerUtterance(spoken));
+    this.applyConfirmation(this.session.answer(digit === "1" ? "yes" : "no"));
     this.messages.push({ role: "user", content: spoken });
     this.enqueueTurn();
   }
 
   // Turns run strictly in order, and a newer utterance supersedes whatever is still being worked out.
-  private enqueueTurn(): void {
+  private enqueueTurn(before?: () => Promise<void>): void {
     this.turnAbort?.abort();
-    this.turnChain = this.turnChain.then(() => this.runTurn());
+    this.turnChain = this.turnChain.then(async () => {
+      await before?.();
+      await this.runTurn();
+    });
   }
 
   private async runTurn(): Promise<void> {

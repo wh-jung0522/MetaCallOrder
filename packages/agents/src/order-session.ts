@@ -1,5 +1,5 @@
 import type { Cart, CartItem, MenuItem } from "@callorder/adapters";
-import { countToKorean, isAffirmative, isNegative, wonToKorean, type Language } from "./text";
+import { countToKorean, isAffirmative, wonToKorean, type Language } from "./text";
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -16,13 +16,13 @@ export function cartHash(cart: Cart): Promise<string> {
 export function buildRecap(storeName: string, cart: Cart, total: number, address: string, language: Language = "ko"): string {
   if (language === "en") {
     const lines = cart.items.map((line) => `${line.quantity} ${line.label_en ?? line.name}`);
-    return `From ${storeName}, ${lines.join(", ")}, ${total.toLocaleString("en-US")} won including delivery, to ${address}. Shall I place this order? Please say yes to confirm.`;
+    return `From ${storeName}, ${lines.join(", ")}, ${total.toLocaleString("en-US")} won including delivery, to ${address}. Shall I place this order?`;
   }
   const lines = cart.items.map((line) => {
     const options = Object.values(line.options).join(" ");
     return `${options ? `${options} ` : ""}${line.name} ${countToKorean(line.quantity)} 개`;
   });
-  return `${storeName}에서 ${lines.join(", ")}, 배달비 포함 ${wonToKorean(total)}, ${address}로 보내드릴까요? 맞으면 네, 라고 말씀해 주세요.`;
+  return `${storeName}에서 ${lines.join(", ")}, 배달비 포함 ${wonToKorean(total)}, ${address}로 보내드릴까요?`;
 }
 
 interface Confirmation {
@@ -33,8 +33,10 @@ interface Confirmation {
 }
 
 export type ConfirmationOutcome = "confirmed" | "rejected" | "none";
+export type Verdict = "yes" | "no" | "unclear";
 
-// Whether an order may be placed is decided here, by code, from what was said aloud. The LLM has no way in.
+// Whether an order may be placed is decided here, from what the caller said after hearing the whole recap.
+// The ordering agents have no way in: only the caller's answer counts, weighed by judgeConfirmation when it is not a plain yes.
 export class OrderSession {
   cart: Cart | null = null;
   language: Language = "ko";
@@ -89,15 +91,26 @@ export class OrderSession {
     this.lastSpoken = null;
   }
 
-  noteCallerUtterance(text: string): ConfirmationOutcome {
+  // The recap the caller heard in full and has not answered yet.
+  get awaitedRecap(): string | null {
     const pending = this.confirmation;
-    if (!pending || pending.confirmed || this.lastSpoken !== pending.recap) return "none";
-    if (isNegative(text)) {
+    return pending && !pending.confirmed && this.lastSpoken === pending.recap ? pending.recap : null;
+  }
+
+  // A plain yes is taken at once; anything else is for judgeConfirmation to weigh, then answer().
+  noteCallerUtterance(text: string): ConfirmationOutcome | "judge" {
+    if (!this.awaitedRecap) return "none";
+    return isAffirmative(text) ? this.answer("yes") : "judge";
+  }
+
+  answer(verdict: Verdict): ConfirmationOutcome {
+    if (!this.awaitedRecap) return "none";
+    if (verdict === "no") {
       this.confirmation = null;
       return "rejected";
     }
-    if (!isAffirmative(text)) return "none";
-    pending.confirmed = true;
+    if (verdict !== "yes") return "none";
+    this.confirmation!.confirmed = true;
     return "confirmed";
   }
 
@@ -109,7 +122,7 @@ export class OrderSession {
   async assertConfirmed(token: string): Promise<string> {
     if (!this.cart?.items.length) throw new Error("장바구니가 비어 있습니다");
     if (!this.confirmation || this.confirmation.token !== token) throw new Error("확인 토큰이 없습니다. 먼저 복창하세요");
-    if (!this.confirmation.confirmed) throw new Error("고객이 아직 '네'라고 확인하지 않았습니다");
+    if (!this.confirmation.confirmed) throw new Error("고객이 아직 주문을 승낙하지 않았습니다");
     const hash = await cartHash(this.cart);
     if (hash !== this.confirmation.cartHash) throw new Error("복창 후 장바구니가 바뀌었습니다. 다시 복창하세요");
     return hash;

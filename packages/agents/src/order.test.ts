@@ -1,6 +1,6 @@
 import type { Cart, Customer, CustomerRepository, MenuItem, MerchantAdapter, OrderResult, PlaceOrderContext, Store } from "@callorder/adapters";
 import { describe, expect, it } from "vitest";
-import { runConversationTurn, type ChatClient } from "./agent";
+import { judgeConfirmation, runConversationTurn, type ChatClient } from "./agent";
 import { buildRecap, OrderSession } from "./order-session";
 import { isAffirmative, isBargeIn, isHandoffRequest, isNegative, isRepeatRequest, nextLanguage, sanitizeForTts, takeSentences, wonToKorean } from "./text";
 import { executeOrderTool, type OrderToolContext } from "./tools";
@@ -70,7 +70,7 @@ describe("place_order confirmation gate", () => {
     const { ctx, orders } = fixture();
     await addTwo(ctx);
     const token = await recap(ctx);
-    await expect(executeOrderTool("place_order", { confirmation_token: token }, ctx)).rejects.toThrow("확인하지");
+    await expect(executeOrderTool("place_order", { confirmation_token: token }, ctx)).rejects.toThrow("승낙하지");
     expect(orders.size).toBe(0);
   });
 
@@ -125,7 +125,8 @@ describe("place_order confirmation gate", () => {
     const { ctx } = fixture();
     await addTwo(ctx);
     const token = await recap(ctx);
-    expect(ctx.session.noteCallerUtterance("아니요 하나만요")).toBe("rejected");
+    expect(ctx.session.noteCallerUtterance("아니요 하나만요")).toBe("judge");
+    expect(ctx.session.answer("no")).toBe("rejected");
     await expect(executeOrderTool("place_order", { confirmation_token: token }, ctx)).rejects.toThrow("토큰");
   });
 
@@ -226,7 +227,7 @@ describe("conversation turn", () => {
     const messages: any[] = [];
     await runConversationTurn(messages, ctx, { client, model: "m" }, hooks(spoken), new AbortController().signal);
     expect(spoken[0]).toBe("네, 확인해 볼게요.");
-    expect(spoken[1]).toBe("행복국밥에서 안 맵게 순대국밥 두 개, 배달비 포함 이만 원, 행복동 12번지로 보내드릴까요? 맞으면 네, 라고 말씀해 주세요.");
+    expect(spoken[1]).toBe("행복국밥에서 안 맵게 순대국밥 두 개, 배달비 포함 이만 원, 행복동 12번지로 보내드릴까요?");
     expect(messages.at(-1)).toEqual({ role: "assistant", content: spoken[1] });
   });
 
@@ -275,7 +276,7 @@ describe("english calls", () => {
     const session = new OrderSession();
     session.addItem({ ...gukbap, name_en: "sundae soup", options: [{ name: "맵기", choices: ["안 맵게", "보통"], choices_en: ["not spicy", "regular"], required: true }] }, 2, { 맵기: "안 맵게" });
     const recap = buildRecap("Happy Soup House", session.cart!, 20000, "12 Haengbok-dong, Seoul", "en");
-    expect(recap).toBe("From Happy Soup House, 2 not spicy sundae soup, 20,000 won including delivery, to 12 Haengbok-dong, Seoul. Shall I place this order? Please say yes to confirm.");
+    expect(recap).toBe("From Happy Soup House, 2 not spicy sundae soup, 20,000 won including delivery, to 12 Haengbok-dong, Seoul. Shall I place this order?");
     expect(recap).not.toMatch(/[가-힣]/);
   });
 });
@@ -307,5 +308,28 @@ describe("catalog", () => {
     } } as unknown as ChatClient;
     await runConversationTurn([], ctx, { client, model: "m" }, { speak() {}, onToolCall() {}, onFirstToken() {}, onUsage() {} }, new AbortController().signal);
     expect(requests[0]!.messages[1]!.content).toContain("구름다방 (카페): 아메리카노");
+  });
+});
+
+describe("judging the answer to the recap", () => {
+  const reply = (content: string) => fakeClient([{ choices: [{ message: { content } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }]);
+  const judge = (content: string) => judgeConfirmation("만리장성에서 짜장면 두 개, 보내드릴까요?", "아니 그대로 해 주세요", { client: reply(content), model: "m" }, () => {});
+
+  it("takes the model's yes or no, and anything else as unclear", async () => {
+    expect(await judge('{"verdict":"yes"}')).toBe("yes");
+    expect(await judge('{"verdict":"no"}')).toBe("no");
+    expect(await judge('{"verdict":"maybe"}')).toBe("unclear");
+    expect(await judge("not json")).toBe("unclear");
+  });
+
+  it("confirms on a judged yes only after the whole recap was heard", async () => {
+    const { ctx } = fixture();
+    await addTwo(ctx);
+    await recap(ctx);
+    expect(ctx.session.noteCallerUtterance("sure, go for it")).toBe("judge");
+    expect(ctx.session.answer("unclear")).toBe("none");
+    expect(ctx.session.answer("yes")).toBe("confirmed");
+    ctx.session.noteInterrupted();
+    expect(ctx.session.answer("yes")).toBe("none");
   });
 });

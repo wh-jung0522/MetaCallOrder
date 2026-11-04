@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
-import { CONVERSATION_PROMPT, ORDER_PROMPT } from "./prompts";
+import type { Verdict } from "./order-session";
+import { CONFIRM_PROMPT, CONVERSATION_PROMPT, ORDER_PROMPT } from "./prompts";
 import { sanitizeForTts } from "./text";
 import { executeOrderTool, ORDER_TOOLS, type OrderToolContext } from "./tools";
 
@@ -48,6 +49,43 @@ const ORDER_RESULT_FORMAT: OpenAI.ResponseFormatJSONSchema = {
     },
   },
 };
+
+const VERDICT_FORMAT: OpenAI.ResponseFormatJSONSchema = {
+  type: "json_schema",
+  json_schema: {
+    name: "confirmation",
+    schema: { type: "object", properties: { verdict: { type: "string", enum: ["yes", "no", "unclear"] } }, required: ["verdict"] },
+  },
+};
+
+// Sees only the recap and the reply, never the rest of the call, so nothing said earlier can talk it into a yes.
+export async function judgeConfirmation(
+  recap: string,
+  reply: string,
+  config: AgentConfig,
+  onUsage: (usage: { prompt_tokens: number; completion_tokens: number }) => void,
+  signal?: AbortSignal,
+): Promise<Verdict> {
+  const response = await config.client.create(
+    {
+      model: config.model,
+      messages: [
+        { role: "system", content: CONFIRM_PROMPT },
+        { role: "user", content: JSON.stringify({ recap, reply }) },
+      ],
+      reasoning_effort: "minimal",
+      response_format: VERDICT_FORMAT,
+    } as OpenAI.ChatCompletionCreateParamsNonStreaming,
+    { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(LLM_TIMEOUT_MS)]) : AbortSignal.timeout(LLM_TIMEOUT_MS) },
+  );
+  if (response.usage) onUsage(response.usage);
+  try {
+    const { verdict } = JSON.parse(response.choices[0]?.message.content ?? "{}");
+    return verdict === "yes" || verdict === "no" ? verdict : "unclear";
+  } catch {
+    return "unclear";
+  }
+}
 
 export interface AgentHooks {
   speak(text: string): void;
