@@ -1,54 +1,107 @@
 # CallOrder
 
-어르신이 전화로 음식·생필품을 주문하는 AI 음성 주문 서비스의 MVP입니다.
+**English** | [한국어](README.ko.md)
+
+**Order food with one phone call.** CallOrder is an AI voice ordering service for seniors who find delivery apps hard to use. No app, no screen, no checkout: call a number and say what you want.
+
+▶ **Demo video:** https://youtu.be/lLVrAXMHL50
+
+Built for the Meta Global AI Developer Hackathon (Indie Developer Track, Build for Your World).
+
+## Try it
+
+| | |
+|---|---|
+| 🇰🇷 Korean number | **070-5276-7404** |
+| 🇺🇸 US number | **+1 515-349-6768** |
+| Web | https://callorder-web.pages.dev |
+
+Both numbers understand Korean and English. Orders go to a demo address. The web call screen and the developer view need an access code and a reviewer login, which are in the hackathon submission.
+
+## What a call looks like
+
+1. **First call:** the agent asks for your delivery address and keeps it. During the demo, delivery is fixed to a demo address and the caller is told so.
+2. **Ordering:** say a dish ("two tteokbokki, please"). The agent finds the store, asks for required options such as spice level, and works out the total from real menus and prices.
+3. **Read-back:** the agent reads the whole order back. **Nothing is ordered until the caller agrees.** A separate model judges any way of saying yes, in Korean or English, so "sure, send it like that" works and "yes, but add a coke" does not.
+4. **Calling back:** while an order is on its way, the call opens with how many minutes are left.
+
+## Screens
+
+| Screen | Path | What you see |
+|---|---|---|
+| Call screen | `/sim` | A browser phone simulator, or live real calls: enter the phone numbers you call from (up to 3) and each call rises into its own panel with the conversation as it happens |
+| Store board | `/merchant` | Every phone order with items, address and total. Accept or decline in one tap. Callers show only by their last four digits |
+| Developer view | `/admin` | Every call with result, length, first-reply time and cost (about 4 cents a call), the transcript with timings, the agents' tool calls, and the recording |
+| Store directory | `/stores` | Stores on a map with their menus |
+
+## How it works
+
+```mermaid
+flowchart LR
+  P[Phone call<br/>ClawOps / Twilio] -->|8 kHz audio| DO[Durable Object<br/>one per call]
+  DO --> STT[Muse Voice Transcribe]
+  STT --> CA[Conversation agent<br/>Muse Spark]
+  CA -->|order_agent| OA[Order agent<br/>Muse Spark + tools]
+  OA --> DB[(Supabase<br/>menus, orders)]
+  CA --> TTS[Typecast voice] --> P
+  DO -.read-back answer.-> J[Confirmation check<br/>Muse Spark]
+  DO -.live events.-> W[Web call screen]
+```
+
+- **Muse Spark 1.3** runs the call as two agents with function calling. The conversation agent talks with the caller in short spoken sentences. The order agent handles stores, menus, cart, pricing, read-back and placing the order with tools (`find_menu`, `cart_add`, `request_confirmation`, `place_order`), using only real data from Supabase.
+- **A third Muse Spark call judges the answer to the read-back.** It sees only the recap and the reply, never the rest of the call. `place_order` still needs a confirmation token issued in code after that yes.
+- **Muse Voice Transcribe 1.0** transcribes phone audio in real time, with store and menu names as keywords. STT and the LLM share one Meta API key.
+- Each call runs in its own **Cloudflare Durable Object**, which streams audio between the phone line, STT, the agents and TTS, records the call, and reports live events to the web call screen.
+
+## Repository
 
 ```
-apps/web            대시보드와 /sim 전화 시뮬레이터, shadcn/ui (Cloudflare Pages)
-apps/voice-worker   통화 1건당 Durable Object 1개 (Cloudflare Workers)
-packages/audio      μ-law, 리샘플러
-packages/agents     프롬프트, 도구, 에이전트 루프, 주문 확인 게이트
-packages/adapters   MerchantAdapter와 Supabase 저장소
-supabase            마이그레이션과 데모 데이터
-eval                종단 간 테스트와 시나리오
+apps/web            Call screen, store board, developer view (React, shadcn/ui, Cloudflare Pages)
+apps/voice-worker   One Durable Object per call (Cloudflare Workers)
+packages/agents     Prompts, tools, agent loop, confirmation gate
+packages/adapters   MerchantAdapter and Supabase repositories
+packages/audio      μ-law and resampling
+supabase            Migrations and demo data
+eval                End-to-end test with fake Meta, TTS and Supabase
 ```
 
-## 개발
+## Development
 
-Node 26과 pnpm 12가 필요합니다.
+Requires Node 26 and pnpm 12.
 
 ```sh
 pnpm install
-pnpm test        # 단위 테스트
-pnpm e2e         # 가짜 Meta·Soniox·Supabase로 통화 전 과정을 실행 (키 불필요)
+pnpm test        # unit tests
+pnpm e2e         # a whole call against fake Meta, TTS and Supabase (no keys needed)
 pnpm typecheck
 
 cp apps/web/.env.example apps/web/.env.local
-pnpm dev:voice   # apps/voice-worker/.dev.vars에 아래 비밀값과 ALLOWED_ORIGINS=http://localhost:5173 필요
+pnpm dev:voice   # needs apps/voice-worker/.dev.vars with the secrets below and ALLOWED_ORIGINS=http://localhost:5173
 pnpm dev:web     # http://localhost:5173/sim
 ```
 
-## Worker 비밀값
+### Worker secrets
 
-`apps/voice-worker`에서 `npx wrangler secret put <이름>`으로 등록합니다. 스테이징은 `--env staging`을 붙입니다.
+Set them in `apps/voice-worker` with `npx wrangler secret put <NAME>` (add `--env staging` for staging).
 
-| 이름 | 내용 |
+| Name | Purpose |
 |---|---|
-| `META_API_KEY` | Meta Model API 키. LLM과 STT 모두 이 키를 씁니다 |
-| `TTS_API_KEY` | Typecast API 키 |
-| `PHONE_WEBHOOK_TOKEN` | ClawOps 번호의 Webhook이 `X-Callorder-Token` 헤더로 보내는 공유 비밀값 |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 서비스 역할 키 |
-| `SIM_ACCESS_CODE` | 시뮬레이터 접속 코드 |
+| `META_API_KEY` | Meta Model API key, used for both the LLM and STT |
+| `TTS_API_KEY` | Typecast API key |
+| `PHONE_WEBHOOK_TOKEN` | Shared secret the ClawOps webhook sends in the `X-Callorder-Token` header |
+| `TWILIO_AUTH_TOKEN` | Verifies Twilio webhook signatures |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+| `SIM_ACCESS_CODE` | Access code for the web call screen |
 
-STT는 Meta Muse Voice Transcribe, TTS는 Typecast(`ssfm-v31`, 목소리 서현)입니다. `TTS_API_KEY`에 Typecast 키를 등록합니다. `wrangler.jsonc`의 `TTS_PROVIDER`를 `none`으로 바꾸면 음성 없이 글자로만 진행되고, `soniox` 연결도 코드에 남아 있습니다.
+TTS is Typecast (`ssfm-v31`). Setting `TTS_PROVIDER` in `wrangler.jsonc` to `none` runs calls in text only; a Soniox connection also remains in the code.
 
-## 배포
+### Deployment
 
-`main`에 푸시하면 Cloudflare가 Pages(`callorder-web`)와 Worker(`callorder-voice`)를 빌드해 배포합니다. Supabase 마이그레이션은 배포에 포함하지 않으며 직접 적용합니다.
+Pushing to `main` makes Cloudflare build and deploy Pages (`callorder-web`) and the Worker (`callorder-voice`). Supabase migrations are not part of the deploy; apply them yourself.
 
-## 실제 전화
+### Phone numbers
 
-ClawOps 070 번호의 착신을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/phone/voice`, POST)으로 두고 `webhookHeaders`에 `X-Callorder-Token`을 넣습니다. 처음 거는 번호는 `customers`에 자동으로 등록되어(이름 `고객`, 시연용 주소 행복동 12번지, `is_demo=false`) 어느 전화로든 주문할 수 있습니다. 첫 통화에서는 주소를 먼저 묻고 들은 그대로 `stated_address`에 저장한 뒤, 시연 중이라 배달 주소는 행복동 12번지로 정해진다고 안내합니다. `is_demo=false`이므로 번호와 통화, 주문은 공개 화면에 나오지 않고, 가게 계정과 관리자 로그인으로만 보입니다. 발신번호가 표시되지 않는 전화는 고객 없이 연결되며 주문은 할 수 없습니다.
+- **Korean number (ClawOps):** point incoming calls to the webhook `https://callorder-voice.kwdg1213.workers.dev/phone/voice` (POST) with the `X-Callorder-Token` header.
+- **US number (Twilio):** set "A call comes in" to the webhook `https://callorder-voice.kwdg1213.workers.dev/twilio/voice` (HTTP POST).
 
-`/sim`의 실제 전화번호 탭에 거는 휴대폰 번호를 넣으면(여러 개는 쉼표로) 그 번호의 통화가 시뮬레이터처럼 실시간 대화로 나오고, 동시에 걸린 통화는 나란히 따로 보입니다. 접속 코드만 있으면 번호를 아는 사람은 누구나 볼 수 있습니다.
-
-미국 번호는 Twilio입니다. 번호의 Voice 설정에서 A call comes in을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/twilio/voice`, HTTP POST)으로 둡니다. `TWILIO_AUTH_TOKEN` 시크릿으로 서명을 검증합니다.
+A number calling for the first time is registered in `customers` (name `고객`, demo address 12 Haengbok-dong). What the caller says on the address question is kept in `stated_address`. Calls with a hidden caller ID connect without a customer and cannot order. Transcripts and recordings are visible only to admins, and recordings are deleted after 30 days.
