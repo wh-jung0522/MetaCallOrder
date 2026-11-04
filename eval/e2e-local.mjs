@@ -347,6 +347,22 @@ try {
   assert.ok(!JSON.stringify(db.call_logs.filter((row) => row.call_sid === "e2e-call-0002")).includes("test-tts"), "provider errors are scrubbed");
   ttsStats.refuse = false;
 
+  // A number's first call asks for the address, keeps what was said, and tells the caller delivery stays at the demo address.
+  stt = null;
+  const firstTime = [];
+  const newcomer = new WebSocket(`ws://127.0.0.1:${WORKER_PORT}/sim/stream?callId=e2e-call-0003&code=code`, { headers: { origin: ORIGIN } });
+  newcomer.on("message", (data, isBinary) => { if (!isBinary) firstTime.push(JSON.parse(data.toString())); });
+  await new Promise((resolve, reject) => { newcomer.on("open", resolve); newcomer.on("error", reject); });
+  newcomer.send(JSON.stringify({ type: "start", callerId: "+821077770001", lang: "ko" }));
+  const agentSaid = (text) => firstTime.some((e) => e.type === "assistant_text" && e.text.includes(text));
+  await until(() => agentSaid("배달 받으실 주소를 말씀해 주세요"), "address asked first");
+  assert.ok(!agentSaid("무엇을 주문해 드릴까요"), "no order question before the address");
+  newcomer.send(JSON.stringify({ type: "utterance", text: "서울 마포구 망원동 12번지요" }));
+  await until(() => agentSaid("시연 중이라 배달 주소는 행복동 12번지로 정해집니다"), "demo address notice");
+  await until(() => db.customers.find((row) => row.phone_e164 === "+821077770001")?.stated_address, "stated address saved");
+  assert.equal(db.customers.find((row) => row.phone_e164 === "+821077770001").stated_address, "서울 마포구 망원동 12번지요");
+  newcomer.close();
+
   // A first-time caller is registered and privately. A blocked caller id still connects, as a phone call, with no customer.
   const callIn = async (from) => {
     const body = new FormData();

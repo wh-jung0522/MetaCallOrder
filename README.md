@@ -47,7 +47,7 @@ STT는 Meta Muse Voice Transcribe, TTS는 Typecast(`ssfm-v31`, 목소리 서현)
 
 ## 실제 전화
 
-ClawOps 070 번호의 착신을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/phone/voice`, POST)으로 두고 `webhookHeaders`에 `X-Callorder-Token`을 넣습니다. 처음 거는 번호는 `customers`에 자동으로 등록되어(이름 `고객`, 시연용 주소 행복동 12번지, `is_demo=false`) 어느 전화로든 주문할 수 있습니다. `is_demo=false`이므로 번호와 통화, 주문은 공개 화면에 나오지 않고, 가게 계정과 관리자 로그인으로만 보입니다. 발신번호가 표시되지 않는 전화는 고객 없이 연결되며 주문은 할 수 없습니다.
+ClawOps 070 번호의 착신을 Webhook(`https://callorder-voice.kwdg1213.workers.dev/phone/voice`, POST)으로 두고 `webhookHeaders`에 `X-Callorder-Token`을 넣습니다. 처음 거는 번호는 `customers`에 자동으로 등록되어(이름 `고객`, 시연용 주소 행복동 12번지, `is_demo=false`) 어느 전화로든 주문할 수 있습니다. 첫 통화에서는 주소를 먼저 묻고 들은 그대로 `stated_address`에 저장한 뒤, 시연 중이라 배달 주소는 행복동 12번지로 정해진다고 안내합니다. `is_demo=false`이므로 번호와 통화, 주문은 공개 화면에 나오지 않고, 가게 계정과 관리자 로그인으로만 보입니다. 발신번호가 표시되지 않는 전화는 고객 없이 연결되며 주문은 할 수 없습니다.
 
 `/sim`의 실제 전화번호 탭에 거는 휴대폰 번호를 넣으면(여러 개는 쉼표로) 그 번호의 통화가 시뮬레이터처럼 실시간 대화로 나오고, 동시에 걸린 통화는 나란히 따로 보입니다. 접속 코드만 있으면 번호를 아는 사람은 누구나 볼 수 있습니다.
 

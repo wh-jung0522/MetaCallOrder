@@ -16,9 +16,11 @@ const RECORDED: Record<string, ArrayBuffer> = {
   "ko-greeting": koGreeting, "en-greeting": enGreeting,
 };
 
-const PHRASES: Record<Language, { greeting: string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
+const PHRASES: Record<Language, { greeting: string; askAddress: string; demoAddress(address: string): string; whatToOrder: string; reorder(item: string): string; silence: string; failSafe: string; handoff: string; noOperator: string; ordered(minutes: number): string }> = {
   ko: {
     greeting: "안녕하세요, 콜오더 주문 전화입니다. AI가 주문을 도와드립니다. 통화 내용은 주문 처리를 위해 기록됩니다.",
+    askAddress: "처음 전화 주셨네요. 배달 받으실 주소를 말씀해 주세요.",
+    demoAddress: (address) => `감사합니다. 지금은 시연 중이라 배달 주소는 ${address}로 정해집니다. 무엇을 주문해 드릴까요?`,
     whatToOrder: "무엇을 주문해 드릴까요?",
     reorder: (item) => `지난번에 ${item} 드셨어요. 같은 걸로 하실까요?`,
     silence: "천천히 말씀하셔도 됩니다.",
@@ -29,6 +31,8 @@ const PHRASES: Record<Language, { greeting: string; whatToOrder: string; reorder
   },
   en: {
     greeting: "Hello, this is CallOrder. An AI will help with your order, and this call is recorded to process it.",
+    askAddress: "This is your first call. Please tell me your delivery address.",
+    demoAddress: () => "Thank you. This is a demo, so orders go to our demo address for now. What would you like to order?",
     whatToOrder: "What would you like to order?",
     reorder: (item) => `Last time you had ${item}. Would you like the same?`,
     silence: "Please take your time.",
@@ -106,6 +110,7 @@ export class CallSession extends DurableObject<Env> {
   // Sentences sent to TTS and not heard yet, so the first chunk of each can be matched to its place in the audio.
   private unheard: number[] = [];
   private voiceIsOff = false;
+  private awaitingAddress = false;
 
   override async fetch(request: Request): Promise<Response> {
     const pair = new WebSocketPair();
@@ -280,6 +285,14 @@ export class CallSession extends DurableObject<Env> {
       return;
     }
     // Asked by code, not the model: the first words reach the caller at once and cannot be a narrated plan.
+    // A number's first call asks where to deliver before anything else.
+    if (this.customer.auto_created && !this.customer.stated_address) {
+      this.awaitingAddress = true;
+      this.messages.push({ role: "assistant", content: PHRASES[language].askAddress });
+      this.say(PHRASES[language].askAddress);
+      this.armSilenceTimer();
+      return;
+    }
     const recent = await customers.recentOrders(this.customer.id, 1).catch(() => []);
     const lastItem = recent[0]?.items[0];
     const lastName = language === "en" ? (lastItem?.label_en ?? lastItem?.name) : lastItem?.name;
@@ -343,9 +356,23 @@ export class CallSession extends DurableObject<Env> {
       return this.say(this.lastSpoken);
     }
 
+    if (this.awaitingAddress) return this.takeAddress(utterance);
+
     this.applyConfirmation(this.session.noteCallerUtterance(utterance));
     this.messages.push({ role: "user", content: utterance });
     this.enqueueTurn();
+  }
+
+  // Whatever is said after the question is kept as the address. The order itself still goes to the demo address, and the caller is told so.
+  private takeAddress(address: string): void {
+    this.awaitingAddress = false;
+    const customer = this.customer!;
+    customer.stated_address = address;
+    void new CustomerRepository(this.db).saveStatedAddress(customer.id, address).catch((error) => console.error("address save failed", error));
+    const notice = PHRASES[this.session.language].demoAddress(customer.default_address);
+    this.messages.push({ role: "user", content: address }, { role: "assistant", content: notice });
+    this.say(notice);
+    this.armSilenceTimer();
   }
 
   private applyConfirmation(outcome: "confirmed" | "rejected" | "none"): void {

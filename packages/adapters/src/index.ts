@@ -13,6 +13,7 @@ export interface Customer {
   preferred_speech_rate: number;
   is_demo: boolean;
   auto_created?: boolean;
+  stated_address?: string | null;
 }
 
 export interface Guardian {
@@ -311,6 +312,12 @@ export class CustomerRepository {
       { phone_e164: phone, name: FIRST_TIME_CALLER_NAME, default_address: "행복동 12번지", lat: 37.5665, lng: 126.978, preferred_speech_rate: 0.95, is_demo: isDemo, auto_created: true },
       { onConflict: "phone_e164", ignoreDuplicates: true },
     );
+    if (error) throw error;
+  }
+
+  // What a first-time caller said their address is. Orders still go to default_address, the demo address, while this is a demo.
+  async saveStatedAddress(customerId: string, address: string): Promise<void> {
+    const { error } = await this.db.from("customers").update({ stated_address: address.slice(0, 200) }).eq("id", customerId);
     if (error) throw error;
   }
 
