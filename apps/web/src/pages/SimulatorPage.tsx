@@ -1,5 +1,5 @@
 import { BatteryFull, Delete, Grid3x3, Mic, MicOff, Phone, PhoneOff, SignalHigh, Wifi } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -405,24 +405,11 @@ export function SimulatorPage() {
     return (
       <div className="flex flex-1 flex-col gap-6 bg-muted p-6">
         {modeSwitch}
-        <Card className="mx-auto w-full max-w-sm text-center">
-          <CardHeader>
-            <CardTitle className="text-xl">{t("이 번호로 전화하세요", "Call this number")}</CardTitle>
-            <CardDescription>{t("휴대폰으로 걸면 AI가 받아 주문을 도와드립니다. 한국어와 영어 모두 됩니다.", "An AI answers and takes your order, in Korean or English.")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {[...PHONE_LINES].sort((a, b) => Number(b.lang === lang) - Number(a.lang === lang)).map((line) => (
-              <a key={line.tel} href={`tel:${line.tel}`} aria-label={`${t(line.name[0], line.name[1])} ${line.number}`} className="text-2xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline">
-                <span aria-hidden="true">{line.flag} </span>{line.number}
-              </a>
-            ))}
-            <p className="text-sm text-muted-foreground">{t("누구나 전화해서 주문할 수 있습니다. 배달지는 시연용 주소로 들어갑니다.", "Anyone can call and order. Orders go to a demo address.")}</p>
-          </CardContent>
-        </Card>
         <LiveCalls code={code} />
       </div>
     );
   }
+
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
@@ -661,14 +648,23 @@ function applyLiveEvent(call: LiveCall, message: Record<string, any>): LiveCall 
   }
 }
 
-const MAX_LIVE_CALLS = 6;
+const MAX_WATCHED = 3;
 
-// Real calls from the numbers given, live. Each call gets its own panel, so calls at the same time sit side by side.
+// One panel per watched number. A new call from that number replaces its panel; a late hang-up from an older call does not.
+function onLiveEvent(calls: Record<string, LiveCall>, phone: string, message: Record<string, any>): Record<string, LiveCall> {
+  const current = calls[phone];
+  if (current?.callId !== message.callId && message.type === "hangup") return calls;
+  const base: LiveCall = current && current.callId === message.callId ? current : { callId: message.callId, caller: phone, timeline: [], partial: "", ended: false };
+  return { ...calls, [phone]: applyLiveEvent(base, message) };
+}
+
+// Real calls from up to three numbers. The page turns into one waiting slot per number, and a call rises into its slot when it starts.
 function LiveCalls({ code }: { code: string }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [typed, setTyped] = useState(() => localStorage.getItem("watch-numbers") ?? localStorage.getItem("sim-my-number") ?? "");
   const [watching, setWatching] = useState<string[]>([]);
-  const [calls, setCalls] = useState<LiveCall[]>([]);
+  const [tooMany, setTooMany] = useState(false);
+  const [calls, setCalls] = useState<Record<string, LiveCall>>({});
 
   useEffect(() => {
     let stopped = false;
@@ -678,12 +674,7 @@ function LiveCalls({ code }: { code: string }) {
       sockets.push(ws);
       ws.onmessage = ({ data }) => {
         const message = JSON.parse(data);
-        if (!message.callId) return;
-        setCalls((all) => {
-          const found = all.find((call) => call.callId === message.callId);
-          const next = applyLiveEvent(found ?? { callId: message.callId, caller: phone, timeline: [], partial: "", ended: false }, message);
-          return found ? all.map((call) => (call === found ? next : call)) : [next, ...all].slice(0, MAX_LIVE_CALLS);
-        });
+        if (message.callId) setCalls((all) => onLiveEvent(all, phone, message));
       };
       // ponytail: fixed 3 s retry; back off if the Worker ever has to turn screens away
       ws.onclose = () => { if (!stopped) setTimeout(() => !stopped && open(phone), 3000); };
@@ -698,33 +689,82 @@ function LiveCalls({ code }: { code: string }) {
   const watch = (event: FormEvent) => {
     event.preventDefault();
     const numbers = [...new Set(typed.split(/[,\n]/).map(toE164).filter((number): number is string => Boolean(number)))];
+    if (!numbers.length) return;
     localStorage.setItem("watch-numbers", typed);
-    setWatching(numbers);
+    setTooMany(numbers.length > MAX_WATCHED);
+    setCalls({});
+    setWatching(numbers.slice(0, MAX_WATCHED));
   };
 
+  const lines = [...PHONE_LINES].sort((a, b) => Number(b.lang === lang) - Number(a.lang === lang));
+
+  if (!watching.length) {
+    return (
+      <Card className="mx-auto w-full max-w-sm text-center">
+        <CardHeader>
+          <CardTitle className="text-xl">{t("이 번호로 전화하세요", "Call this number")}</CardTitle>
+          <CardDescription>{t("휴대폰으로 걸면 AI가 받아 주문을 도와드립니다. 한국어와 영어 모두 됩니다.", "An AI answers and takes your order, in Korean or English.")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {lines.map((line) => (
+            <a key={line.tel} href={`tel:${line.tel}`} aria-label={`${t(line.name[0], line.name[1])} ${line.number}`} className="text-2xl font-extrabold whitespace-nowrap text-primary underline-offset-4 hover:underline">
+              <span aria-hidden="true">{line.flag} </span>{line.number}
+            </a>
+          ))}
+          <p className="text-sm text-muted-foreground">{t("누구나 전화해서 주문할 수 있습니다. 배달지는 시연용 주소로 들어갑니다.", "Anyone can call and order. Orders go to a demo address.")}</p>
+          <Separator />
+          <form className="flex flex-col gap-2 text-left" onSubmit={watch}>
+            <label htmlFor="watch-numbers" className="text-sm font-medium">{t("화면에 띄울 통화의 발신 번호 (최대 3개, 쉼표로 구분)", "Show calls coming from these numbers (up to 3, separate with commas)")}</label>
+            <div className="flex gap-2">
+              <Input id="watch-numbers" type="tel" autoComplete="tel" placeholder={t("010-0000-0000", "+1 000 000 0000")} value={typed} onChange={(event) => setTyped(event.target.value)} />
+              <Button type="submit" variant="secondary">{t("대기하기", "Wait for calls")}</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("여기서 전화가 걸리지는 않습니다. 대기 화면으로 바뀐 뒤 그 휴대폰으로 위 번호에 거세요.", "This page does not place the call. Once it is waiting, call the number above from those phones.")}</p>
+          </form>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <section aria-label={t("실시간 통화", "Live calls")} className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <form className="mx-auto flex w-full max-w-sm flex-col gap-2" onSubmit={watch}>
-        <label htmlFor="watch-numbers" className="text-sm font-medium">{t("화면에 띄울 통화의 발신 번호 (여러 개는 쉼표로)", "Show calls coming from these numbers (separate with commas)")}</label>
-        <div className="flex gap-2">
-          <Input id="watch-numbers" type="tel" autoComplete="tel" placeholder={t("010-0000-0000", "+1 000 000 0000")} value={typed} onChange={(event) => setTyped(event.target.value)} />
-          <Button type="submit" variant="secondary">{t("화면에 띄우기", "Show calls")}</Button>
-        </div>
-        {watching.length > 0 && <p className="text-sm text-muted-foreground">{t("여기서 전화가 걸리지는 않습니다. 이 휴대폰으로 위 번호에 걸면 대화가 아래에 실시간으로 나옵니다: ", "This page does not place the call. Call the number above from these phones and the conversation appears below: ")}{watching.map(formatPhone).join(", ")}</p>}
-      </form>
-      {calls.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {calls.map((call) => (
-            <div key={call.callId} className="flex h-[min(60svh,640px)] min-h-72 flex-col rounded-xl border bg-background">
+    <section aria-label={t("실시간 통화", "Live calls")} className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-lg font-semibold">
+          {t("이 번호로 전화하세요", "Call")}{" "}
+          {lines.map((line, index) => <span key={line.tel} className="whitespace-nowrap text-primary">{index > 0 && " · "}{line.flag} {line.number}</span>)}
+        </p>
+        <Button variant="outline" onClick={() => setWatching([])}>{t("대기 그만하기", "Stop waiting")}</Button>
+      </div>
+      {tooMany && <Alert><AlertDescription>{t("한 번에 3개 번호까지만 띄웁니다. 앞의 3개를 기다립니다.", "Up to 3 numbers at once. Waiting for the first 3.")}</AlertDescription></Alert>}
+      <div className={`grid flex-1 gap-4 ${["", "", "md:grid-cols-2", "md:grid-cols-3"][watching.length]}`}>
+        {watching.map((phone, index) => {
+          const call = calls[phone];
+          if (!call) {
+            return (
+              <div key={phone} className="flex h-[min(72svh,760px)] min-h-80 flex-col items-center justify-center gap-5 rounded-xl border border-dashed bg-background p-6 text-center" role="status">
+                <span className="relative flex size-16 items-center justify-center">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/25 motion-reduce:animate-none" />
+                  <span className="relative flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground"><Phone className="size-6" /></span>
+                </span>
+                <div>
+                  <p className="text-lg font-semibold">{t("전화를 기다리는 중", "Waiting for a call")}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{formatPhone(phone)}</p>
+                </div>
+              </div>
+            );
+          }
+          return (
+            // Keyed by call, so each new call rises in again. --from points back to the bottom middle of the screen.
+            <div key={call.callId} style={{ "--from": (watching.length - 1) / 2 - index } as CSSProperties} className="call-rise flex h-[min(72svh,760px)] min-h-80 flex-col rounded-xl border bg-background shadow-lg">
               <div className="flex items-center justify-between border-b px-4 py-2 text-sm">
                 <span className="font-medium">{formatPhone(call.caller)}</span>
-                <Badge variant={call.ended ? "secondary" : "default"}>{call.ended ? t("통화 종료", "Ended") : t("통화 중", "On call")}</Badge>
+                <Badge variant={call.ended ? "secondary" : "default"}>{call.ended ? t("통화 종료, 다음 전화 대기 중", "Ended, waiting for the next call") : t("통화 중", "On call")}</Badge>
               </div>
               <Transcript timeline={call.timeline} partial={call.partial} callerLabel={t("고객", "Customer")} />
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </section>
   );
 }
